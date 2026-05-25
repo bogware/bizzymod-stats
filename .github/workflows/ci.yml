@@ -17,20 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify prerequisites
-        run: |
-          set -euo pipefail
-          for cmd in docker bash curl unzip tar; do
-            command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd"; exit 1; }
-          done
-          # python check via the same logic the test script uses
-          for c in python3 python python3.12 python3.11 python3.10; do
-            if command -v "$c" >/dev/null 2>&1 \
-               && "$c" -c "import sys" >/dev/null 2>&1; then
-              echo "python: $c"; exit 0
-            fi
-          done
-          echo "missing: a working python interpreter" >&2; exit 1
+      - name: Ensure prerequisites (auto-install if missing)
+        run: bash .github/ensure-prereqs.sh
 
       - name: Install pymysql
         run: |

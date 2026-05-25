@@ -37,6 +37,38 @@ The runner needs the `self-hosted` label (added by GitHub
 automatically) and the `linux` label (also automatic). No custom labels
 needed beyond those — our workflows target `runs-on: [self-hosted, linux]`.
 
+## Self-healing prereqs
+
+The workflows run `.github/ensure-prereqs.sh` as their first step. If
+any of {`docker`, `curl`, `unzip`, `tar`, `zip`, `git`, `python3`} is
+missing, the script attempts to install it via `sudo -n apt-get` (i.e.
+non-interactive passwordless sudo). This means a fresh runner only has
+to be **registered** — the workflow installs everything else on demand.
+
+For the auto-install to work, the runner user needs **passwordless sudo
+for `apt-get`**. Add this once to `/etc/sudoers.d/bizzymod-runner`:
+
+```bash
+sudo visudo -f /etc/sudoers.d/bizzymod-runner
+```
+
+```
+# Allow the actions-runner user to install packages without a prompt
+<runner-user> ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt
+```
+
+(Replace `<runner-user>` with whatever user owns `~/actions-runner`.)
+
+If passwordless sudo isn't configured, the workflow fails with a clear
+message telling you what's missing — at which point you can either run
+`sudo bash .github/runner-setup.sh` once on the host, or grant sudo and
+re-trigger.
+
+A docker install also requires the runner user to be in the `docker`
+group. The ensure-prereqs script warns if `docker ps` fails after a
+fresh install; in that case run `sudo usermod -aG docker $USER &&
+sudo systemctl restart actions.runner.*` once.
+
 ## What the workflows expect on the runner
 
 | Requirement | Version       | Used by                          | Install command |

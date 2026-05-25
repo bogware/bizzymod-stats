@@ -20,6 +20,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
+      - name: Ensure prerequisites (auto-install if missing)
+        run: bash .github/ensure-prereqs.sh
+
       - name: Compute version
         id: ver
         run: |
