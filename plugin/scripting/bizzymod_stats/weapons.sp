@@ -43,18 +43,36 @@ stock void Bizzy_Weapons_RecordHit(int client, const char[] weapon, int damage)
         EnsureWeapon(weapon, client, damage, /*kill=*/false, /*hs=*/false);
         return;
     }
-    g_Clients[client].shotsFired++;
+    // NOTE: do NOT increment client-level shotsFired here — Event_WeaponFire
+    // already counts shots fired per-tick. This handler is per-hit only.
 
     char sql[512];
     FormatEx(sql, sizeof sql,
         "INSERT INTO player_weapon_stats "
-        ... "(player_id, weapon_id, shots_fired, shots_hit, damage_dealt) "
-        ... "VALUES (%d, %d, 1, 1, %d) "
+        ... "(player_id, weapon_id, shots_hit, damage_dealt) "
+        ... "VALUES (%d, %d, 1, %d) "
         ... "ON DUPLICATE KEY UPDATE "
-        ... "  shots_fired = shots_fired + 1, "
         ... "  shots_hit   = shots_hit + 1, "
         ... "  damage_dealt = damage_dealt + VALUES(damage_dealt)",
         g_Clients[client].playerId, wid, damage);
+    Bizzy_DB_Exec(sql);
+}
+
+stock void Bizzy_Weapons_RecordShot(int client, const char[] weapon)
+{
+    if (g_DB == null || g_Clients[client].playerId == 0 || weapon[0] == '\0') return;
+    if (g_WeaponIds == null) Bizzy_Weapons_Init();
+
+    int wid;
+    if (!g_WeaponIds.GetValue(weapon, wid))
+        return; // weapon will be inserted on first hit, when we have damage context
+
+    char sql[384];
+    FormatEx(sql, sizeof sql,
+        "INSERT INTO player_weapon_stats (player_id, weapon_id, shots_fired) "
+        ... "VALUES (%d, %d, 1) "
+        ... "ON DUPLICATE KEY UPDATE shots_fired = shots_fired + 1",
+        g_Clients[client].playerId, wid);
     Bizzy_DB_Exec(sql);
 }
 

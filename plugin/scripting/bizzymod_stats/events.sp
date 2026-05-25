@@ -193,29 +193,24 @@ static void Event_PlayerHurt(Event event, const char[] name, bool dontBroadcast)
         int zc = Bizzy_ZombieClass(victim);
         SpecialInfected si = Bizzy_NormalizeZombieClass(zc);
         if (si == SI_Tank)
-        {
             g_Clients[attacker].damageToTank += dmg;
-            if (dmg > g_Clients[attacker].biggestTankPunch && IsFakeClient(victim) == false)
-            {
-                // not the same as tank-punch tracking but we use this slot for "biggest single damage event vs tank"
-            }
-        }
         else if (si == SI_Witch)
             g_Clients[attacker].damageToWitch += dmg;
         else if (si != SI_None)
             g_Clients[attacker].damageToSpecial += dmg;
     }
 
-    // Tank punch tracking: if attacker is on infected team and the SI is Tank
+    // Tank punch tracking: if attacker is on infected team and the SI is Tank,
+    // AND the victim is a survivor (i.e. an actual punch landed).
     if (Bizzy_IsValidPlayer(attacker) && GetClientTeam(attacker) == TEAM_INFECTED
-        && Bizzy_NormalizeZombieClass(Bizzy_ZombieClass(attacker)) == SI_Tank)
+        && Bizzy_NormalizeZombieClass(Bizzy_ZombieClass(attacker)) == SI_Tank
+        && victim > 0 && victim <= MaxClients && IsClientInGame(victim)
+        && GetClientTeam(victim) == TEAM_SURVIVORS)
     {
         if (dmg > g_Clients[attacker].biggestTankPunch)
             g_Clients[attacker].biggestTankPunch = dmg;
         Bizzy_TankWitch_TankPunch(attacker);
-        if (victim > 0 && victim <= MaxClients && IsClientInGame(victim)
-            && GetClientTeam(victim) == TEAM_SURVIVORS)
-            Bizzy_TankWitch_TankDealt(attacker, dmg);
+        Bizzy_TankWitch_TankDealt(attacker, dmg);
     }
     // Damage *received* by an active tank (survivor → tank)
     if (victim > 0 && victim <= MaxClients && IsClientInGame(victim)
@@ -241,6 +236,8 @@ static void Event_PlayerIncap(Event event, const char[] name, bool dontBroadcast
     {
         g_Clients[victim].incaps++;
         Bizzy_Versus_AccumIncap(victim);
+        if (GetClientTeam(victim) == TEAM_SURVIVORS)
+            Bizzy_Coord_OnIncapDuringCrescendo();
     }
     if (Bizzy_IsValidPlayer(attacker) && GetClientTeam(attacker) == TEAM_INFECTED)
         Bizzy_Score(attacker, GetCV("bizzymod_stats_survivor_incap", 15), "incap_survivor");
@@ -538,7 +535,12 @@ static void Event_WeaponFire(Event event, const char[] name, bool dontBroadcast)
     if (StrEqual(weapon, "pipe_bomb"))   g_Clients[client].pipeBombsThrown++;
     else if (StrEqual(weapon, "molotov")) g_Clients[client].molotovsThrown++;
     else if (StrEqual(weapon, "vomitjar")) g_Clients[client].bileBombsThrown++;
-    else                                   g_Clients[client].shotsFired++;
+    else
+    {
+        g_Clients[client].shotsFired++;
+        // Per-weapon shots_fired increment (separate from per-hit attribution).
+        Bizzy_Weapons_RecordShot(client, weapon);
+    }
 }
 
 // --- 007 extended event handlers ---

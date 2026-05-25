@@ -88,8 +88,9 @@ bool g_FirstDownFired      = false;
 
 void Bizzy_OnVersusInit()
 {
-    HookEvent("versus_round_start",   Event_VRoundStart, EventHookMode_PostNoCopy);
-    HookEvent("scavenge_round_start", Event_VRoundStart, EventHookMode_PostNoCopy);
+    // EventHookMode_Post (NOT PostNoCopy): we read is_secondary_round from the event.
+    HookEvent("versus_round_start",   Event_VRoundStart, EventHookMode_Post);
+    HookEvent("scavenge_round_start", Event_VRoundStart, EventHookMode_Post);
     HookEvent("round_end",            Event_VRoundEnd,   EventHookMode_Post);
     HookEvent("versus_match_finished", Event_VMatchFinished, EventHookMode_PostNoCopy);
     HookEvent("scavenge_match_finished", Event_VMatchFinished, EventHookMode_PostNoCopy);

@@ -103,7 +103,6 @@ static void OnReviveInserted(Database db, DBResultSet rs, const char[] error, Da
         g_LastReviveByUid[reviver] = GetTime();
         g_LastReviveByChainRoot[reviver] = (chainRoot != 0) ? chainRoot : newId;
     }
-    if (revivedUid != 0) {} // unused
 }
 
 // -----------------------------------------------------------------------------
@@ -112,8 +111,6 @@ static void OnReviveInserted(Database db, DBResultSet rs, const char[] error, Da
 
 static int g_CrescendoOpenId = 0;
 static int g_CrescendoOpenEpoch = 0;
-static int g_CrescendoStartIncaps = 0;
-static int g_CrescendoStartDeaths = 0;
 static int g_CrescendoSurvivorsDown = 0;
 static int g_CrescendoSurvivorsDied = 0;
 

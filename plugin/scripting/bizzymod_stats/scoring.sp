@@ -53,8 +53,9 @@ stock void Bizzy_RecordKill(int killer, int victim, bool headshot,
     }
     else if (kteam == TEAM_INFECTED && vteam == TEAM_SURVIVORS)
     {
-        Bizzy_Score(killer, GetConVarInt(FindConVar("bizzymod_stats_survivor_death")),
-                    "survivor_kill");
+        ConVar cv = FindConVar("bizzymod_stats_survivor_death");
+        int pts = (cv == null) ? 40 : cv.IntValue;
+        Bizzy_Score(killer, pts, "survivor_kill");
     }
     else if (kteam == vteam && killer != victim)
     {
@@ -113,7 +114,8 @@ static void HandleFriendlyFire(int attacker, int victim, int damage)
     g_Clients[attacker].lastDamageVictim = victim;
     g_Clients[attacker].lastDamageTime   = now;
 
-    int basePenalty = -GetConVarInt(FindConVar("bizzymod_stats_ff_base_penalty"));
+    ConVar cv = FindConVar("bizzymod_stats_ff_base_penalty");
+    int basePenalty = -((cv == null) ? 25 : cv.IntValue);
     Bizzy_Score(attacker, basePenalty, "friendly_fire");
     Bizzy_Awards_Fire(attacker, "friendly_fire", 1);
 }
