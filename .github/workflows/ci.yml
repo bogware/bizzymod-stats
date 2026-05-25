@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Self-hosted runner requirements documented in docs/CI.md.
+# Required labels on the runner: `self-hosted`. Optional labels: `linux`, `x64`.
+
+jobs:
+  test:
+    name: Compile + migrations + integrity
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify prerequisites
+        run: |
+          set -euo pipefail
+          for cmd in docker bash curl unzip tar; do
+            command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd"; exit 1; }
+          done
+          # python check via the same logic the test script uses
+          for c in python3 python python3.12 python3.11 python3.10; do
+            if command -v "$c" >/dev/null 2>&1 \
+               && "$c" -c "import sys" >/dev/null 2>&1; then
+              echo "python: $c"; exit 0
+            fi
+          done
+          echo "missing: a working python interpreter" >&2; exit 1
+
+      - name: Install pymysql
+        run: |
+          set -e
+          for c in python3 python python3.12 python3.11 python3.10; do
+            if command -v "$c" >/dev/null 2>&1 \
+               && "$c" -c "import sys" >/dev/null 2>&1; then
+              "$c" -m pip install --user --quiet -r schema/scripts/requirements.txt
+              break
+            fi
+          done
+
+      - name: Run test harness
+        run: bash tests/run.sh
+
+      - name: Upload compiled .smx
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bizzymod_stats-smx
+          path: plugin/build/bizzymod_stats.smx
+          if-no-files-found: error
+          retention-days: 14

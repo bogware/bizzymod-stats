@@ -1,0 +1,9 @@
+<table class="stats">
+<tr><th rowspan=2><?php echo $language_pack['difficulty']; ?></th><th rowspan=2><?php echo $language_pack['playtime']; ?></th><th rowspan=2><?php echo $language_pack['all4dead']; ?></th><th colspan=2><?php echo $language_pack['points']; ?></th><th colspan=2><?php echo $language_pack['kills']; ?></th></tr>
+<tr><th><img src="<?php echo $icon_infected;?>" alt="<?php echo $language_pack['infectedpoints']; ?>"></th><th><img src="<?php echo $icon_survivors;?>" alt="<?php echo $language_pack['survivorpoints']; ?>"></th><th><img src="<?php echo $icon_infected;?>" alt="<?php echo $language_pack['infectedkills']; ?>"></th><th><img src="<?php echo $icon_survivors;?>" alt="<?php echo $language_pack['survivorkills']; ?>"></th></tr>
+<tr><td><?php echo $language_pack['normal']; ?></td><td><?php echo $playtime[0];?></td><td><?php echo $infected_win[0];?></td><td><?php echo $points_infected[0];?></td><td><?php echo $points[0];?></td><td><?php echo $kills[0];?></td><td><?php echo $survivor_kills[0];?></td></tr>
+<tr class="alt"><td><?php echo $language_pack['advanced']; ?></td><td><?php echo $playtime[1];?></td><td><?php echo $infected_win[1];?></td><td><?php echo $points_infected[1];?></td><td><?php echo $points[1];?></td><td><?php echo $kills[1];?></td><td><?php echo $survivor_kills[1];?></td></tr>
+<tr><td><?php echo $language_pack['expert']; ?></td><td><?php echo $playtime[2];?></td><td><?php echo $infected_win[2];?></td><td><?php echo $points_infected[2];?><td><?php echo $points[2];?></td><td><?php echo $kills[2];?></td><td><?php echo $survivor_kills[2];?></td></tr>
+<tr class="alt"><td><b><?php echo $language_pack['total']; ?></b></td><td><b><?php echo $playtime[3];?></b></td><td><b><?php echo $infected_win[3];?></b></td><td><b><?php echo $points_infected[3];?></b></td><td><b><?php echo $points[3];?></b></td><td><b><?php echo $kills[3];?></b></td><td><b><?php echo $survivor_kills[3];?></b></td></tr>
+</table>
+

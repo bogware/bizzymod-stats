@@ -1,0 +1,44 @@
+project:
+  name: bizzymod-stats
+  sourcemod:
+    version: "1.12.0-git7210"
+  dependencies:
+    - name: sourcemod
+      type: tar
+      version: "1.12.0-git7210"
+      source: "https://sm.alliedmods.net/smdrop/1.12/sourcemod-1.12.0-git7210-linux.tar.gz"
+      unpack:
+        - addons/sourcemod/scripting/include
+    - name: left4dhooks
+      type: git
+      source: "https://github.com/SilvDev/Left4DHooks.git"
+      branch: master
+      unpack:
+        - addons/sourcemod/scripting/include
+      optional: true
+    - name: colors
+      type: file
+      source: "https://raw.githubusercontent.com/Bara/Multi-Colors/master/addons/sourcemod/scripting/include/multicolors.inc"
+      dest: addons/sourcemod/scripting/include/multicolors.inc
+      optional: true
+  build:
+    targets:
+      - name: bizzymod_stats
+        source: plugin/scripting/bizzymod_stats.sp
+        compiler: spcomp
+        output: plugin/build/bizzymod_stats.smx
+    package:
+      - source: plugin/build/bizzymod_stats.smx
+        dest: addons/sourcemod/plugins/bizzymod_stats.smx
+      - source: plugin/gamedata/bizzymod_stats.txt
+        dest: addons/sourcemod/gamedata/bizzymod_stats.txt
+      - source: plugin/translations/
+        dest: addons/sourcemod/translations/
+      - source: plugin/configs/
+        dest: addons/sourcemod/configs/bizzymod_stats/
+      - source: schema/migrations/
+        dest: schema/migrations/
+      - source: schema/scripts/migrate.py
+        dest: schema/migrate.py
+      - source: docs/INSTALL.md
+        dest: INSTALL.md

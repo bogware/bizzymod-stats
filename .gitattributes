@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+# Always LF, regardless of platform
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.py        text eol=lf
+*.sp        text eol=lf
+*.inc       text eol=lf
+*.sql       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Makefile    text eol=lf
+
+# Binary
+*.smx       binary
+*.zip       binary
+*.tar.gz    binary
+*.png       binary
+*.jpg       binary
+*.ttf       binary
+*.csv       binary

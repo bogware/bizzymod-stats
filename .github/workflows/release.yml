@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package (without leading v)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, package, publish
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Compute version
+        id: ver
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pymysql
+        run: |
+          set -e
+          for c in python3 python python3.12 python3.11 python3.10; do
+            if command -v "$c" >/dev/null 2>&1 \
+               && "$c" -c "import sys" >/dev/null 2>&1; then
+              "$c" -m pip install --user --quiet -r schema/scripts/requirements.txt
+              break
+            fi
+          done
+
+      - name: Run test harness (gate the release)
+        run: bash tests/run.sh
+
+      # tests/run.sh already produced plugin/build/bizzymod_stats.smx.
+
+      - name: Stage release tree
+        id: stage
+        run: |
+          set -euxo pipefail
+          STAGE="bizzymod-stats-${{ steps.ver.outputs.version }}"
+          mkdir -p \
+            "$STAGE/addons/sourcemod/plugins" \
+            "$STAGE/addons/sourcemod/gamedata" \
+            "$STAGE/addons/sourcemod/translations" \
+            "$STAGE/addons/sourcemod/configs/bizzymod_stats" \
+            "$STAGE/schema/migrations/mysql" \
+            "$STAGE/schema"
+
+          cp plugin/build/bizzymod_stats.smx              "$STAGE/addons/sourcemod/plugins/"
+          cp plugin/gamedata/bizzymod_stats.txt           "$STAGE/addons/sourcemod/gamedata/"
+          cp plugin/translations/bizzymod_stats.phrases.txt "$STAGE/addons/sourcemod/translations/"
+          cp plugin/configs/databases.cfg.example         "$STAGE/addons/sourcemod/configs/bizzymod_stats/"
+          cp plugin/configs/bizzymod_stats.cfg.example    "$STAGE/addons/sourcemod/configs/bizzymod_stats/"
+          cp schema/migrations/mysql/*.sql                "$STAGE/schema/migrations/mysql/"
+          cp schema/scripts/migrate.py                    "$STAGE/schema/"
+          cp schema/scripts/install.sh                    "$STAGE/schema/"
+          cp schema/scripts/install.ps1                   "$STAGE/schema/"
+          cp schema/scripts/requirements.txt              "$STAGE/schema/"
+          cp docs/INSTALL.md README.md LICENSE            "$STAGE/" 2>/dev/null || true
+
+          tar czf "$STAGE/source.tar.gz" plugin/scripting
+          zip -rq "$STAGE.zip" "$STAGE"
+          echo "zip=$STAGE.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          {
+            echo "# bizzymod-stats ${{ steps.ver.outputs.version }}"
+            echo ""
+            if [[ -z "$PREV" ]]; then
+              git log --pretty=format:'- %s (%h)'
+            else
+              git log --pretty=format:'- %s (%h)' "$PREV"..HEAD
+            fi
+          } > CHANGELOG.txt
+          head -200 CHANGELOG.txt
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "bizzymod-stats ${{ steps.ver.outputs.version }}"
+          body_path: CHANGELOG.txt
+          files: ${{ steps.stage.outputs.zip }}
+          draft: false
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+          fail_on_unmatched_files: true

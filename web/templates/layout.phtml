@@ -1,0 +1,35 @@
+<?php /** @var string $title */ /** @var array $site */ use Bizzy\View; ?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title><?= View::e($title) ?> &mdash; <?= View::e($site['name']) ?></title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <?php if (!empty($site['refresh'])): ?>
+    <meta http-equiv="refresh" content="<?= (int)$site['refresh'] ?>">
+  <?php endif; ?>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fafafa; }
+    a    { color: #06c; text-decoration: none; } a:hover { text-decoration: underline; }
+    nav  { padding: .5rem 0; border-bottom: 1px solid #ddd; margin-bottom: 1.5rem; }
+    nav a { margin-right: 1rem; }
+    h1   { margin: .25rem 0 1rem; font-size: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .4rem .6rem; border-bottom: 1px solid #eee; text-align: left; }
+    th     { background: #f0f0f0; font-weight: 600; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    footer { margin-top: 3rem; color: #888; font-size: .85rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Top players</a>
+    <a href="/matches.php">Matches</a>
+    <a href="/awards.php">Awards</a>
+    <a href="/server.php">Servers</a>
+  </nav>
+  <h1><?= View::e($title) ?></h1>
+  <?= $body ?? '' ?>
+  <footer>bizzymod-stats &middot; stub template &middot; <?= View::e($site['name']) ?></footer>
+</body>
+</html>

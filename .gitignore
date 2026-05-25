@@ -1,0 +1,30 @@
+# Compiled SourcePawn
+*.smx
+
+# SourceKnight build output
+.sourceknight/
+build/
+dist/
+*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local config
+web-new/config.local.php
+plugin/configs/databases.local.cfg
+.env
+.env.local
+
+# Migration runner
+schema/scripts/.venv/
+schema/scripts/__pycache__/
+*.pyc
+
+# Legacy (kept for reference but never edited)
+legacy/**/cache/
+legacy/**/config.php
