@@ -3,6 +3,33 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.6.1] — UNRELEASED
+
+### Fixed
+
+- **Query buffer truncation in player_stats upsert.** The session-flush
+  transaction's main `INSERT INTO player_stats … ON DUPLICATE KEY UPDATE …`
+  exceeded its 2048-byte `FormatEx` buffer after the schema grew through
+  migration 010, silently chopping the statement mid-keyword. Surfaced as
+  MySQL errors like `Unknown column 'damage_to_ta'`, `'VALUES'` → `'VALUE'`
+  → `'VALU'` → `'V'`, and `syntax error … near ''`. Whole transactions
+  were rejected, so session counters never persisted. Bumped the buffer
+  to 4096. Long-term fix tracked separately: switch the wide upserts to
+  parameterized queries. (#5)
+- **`tank_records.fk_tr_map` foreign-key violation on tank/witch spawn.**
+  `g_CurrentMapId` is resolved through an async `INSERT IGNORE INTO maps
+  → SELECT id` chain that only kicks off in `OnMapStart`. On a plugin
+  hot-reload or DB-late-connect mid-map, `g_CurrentMapId` stayed at 0 and
+  the first boss spawn after produced a foreign-key error against
+  `maps.id`. Three-part fix:
+    - The DB-ready callback (`OnServerLookup`) now triggers
+      `Bizzy_Identity_ResolveMap()` itself, so a late connect catches up.
+    - `Bizzy_Identity_ResolveMap()` refreshes `g_CurrentMap` from the
+      engine on every call (no longer relies on `OnMapStart` having
+      already populated it).
+    - Tank- and witch-spawn inserts now bail with `g_CurrentMapId == 0`
+      instead of attempting the FK-violating insert. (#5)
+
 ## [0.6.0] — 2026-05-25
 
 **First public release.** Built from scratch over a 2026-Q2 sprint as a
