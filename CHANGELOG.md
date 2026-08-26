@@ -3,6 +3,18 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [Unreleased]
+
+### Fixed
+
+- **Negative session score dropped the whole stat flush (#7).** A player who
+  ended a session with negative points (griefing / friendly fire, with
+  `negative_score` on) produced a negative `most_points_in_session`, but that
+  column is `INT UNSIGNED` — MySQL rejected the row with "Out of range value",
+  which failed the career-bests query and rolled back the entire
+  `Bizzy_Session_Flush` transaction, losing that session's stats. Clamp the
+  inserted value with `GREATEST(0, …)`; a negative career "best" is meaningless.
+
 ## [0.6.0] — 2026-05-25
 
 **First public release.** Built from scratch over a 2026-Q2 sprint as a
