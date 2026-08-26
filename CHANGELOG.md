@@ -36,6 +36,13 @@ All notable changes to bizzymod-stats are documented here. Format follows
   generated on every boot, fragmenting player stats across many `server_id`s.
   The keyfile now lives in the writable SM `data/` dir, so the key persists and
   the server keeps one stable `server_id` across restarts.
+- **Negative session score dropped the whole stat flush (#7).** A player who
+  ended a session with negative points (griefing / friendly fire, with
+  `negative_score` on) produced a negative `most_points_in_session`, but that
+  column is `INT UNSIGNED` — MySQL rejected the row with "Out of range value",
+  which failed the career-bests query and rolled back the entire
+  `Bizzy_Session_Flush` transaction, losing that session's stats. Clamp the
+  inserted value with `GREATEST(0, …)`; a negative career "best" is meaningless.
 
 ## [0.6.0] — 2026-05-25
 
