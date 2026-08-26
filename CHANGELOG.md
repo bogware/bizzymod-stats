@@ -29,6 +29,13 @@ All notable changes to bizzymod-stats are documented here. Format follows
       already populated it).
     - Tank- and witch-spawn inserts now bail with `g_CurrentMapId == 0`
       instead of attempting the FK-violating insert. (#5)
+- **Server-key persistence / `server_id` churn (#6).** The server key was
+  written via `BuildPath(Path_SM, "cfg/sourcemod/…")`, which resolves to
+  `addons/sourcemod/cfg/sourcemod/` — a directory that does not exist — so the
+  write silently failed and a fresh random key (hence a fresh `servers.id`) was
+  generated on every boot, fragmenting player stats across many `server_id`s.
+  The keyfile now lives in the writable SM `data/` dir, so the key persists and
+  the server keeps one stable `server_id` across restarts.
 
 ## [0.6.0] — 2026-05-25
 
