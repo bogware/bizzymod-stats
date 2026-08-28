@@ -74,7 +74,10 @@ jobs:
           cp docs/INSTALL.md README.md LICENSE            "$STAGE/" 2>/dev/null || true
 
           tar czf "$STAGE/source.tar.gz" plugin/scripting
-          zip -rq "$STAGE.zip" "$STAGE"
+          # Build $STAGE.zip with python3's stdlib zipfile rather than the `zip`
+          # binary, so the self-hosted runner doesn't need `zip` installed. This
+          # produces the same archive (entries prefixed with "$STAGE/").
+          python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', '.', sys.argv[1])" "$STAGE"
           echo "zip=$STAGE.zip" >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
