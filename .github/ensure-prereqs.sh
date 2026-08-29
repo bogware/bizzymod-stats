@@ -6,14 +6,21 @@
 # helpful message pointing at .github/runner-setup.sh and exits non-zero.
 #
 # Tools probed:
-#   bash docker curl unzip tar zip git python3
+#   bash docker curl tar git python3
 #
 # The Python check uses --version because Windows runners with the Microsoft
 # Store stub have python3 on PATH but it isn't a real interpreter.
+#
+# NOTE: unzip/zip are deliberately NOT required. On this Linux runner the
+# SourceMod toolchain is fetched as .tar.gz (tar), and release packaging builds
+# the .zip via python3's stdlib zipfile — so neither the `unzip` nor `zip`
+# binary is ever invoked by ci.yml/release.yml. (`unzip` is used only by
+# tests/run.sh on the Windows dev path.) Requiring them here made CI hard-fail
+# on runners that happen to lack them even though nothing uses them.
 
 set -euo pipefail
 
-REQUIRED_BINS=(docker curl unzip tar zip git)
+REQUIRED_BINS=(docker curl tar git)
 
 missing=()
 for cmd in "${REQUIRED_BINS[@]}"; do

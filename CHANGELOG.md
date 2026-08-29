@@ -3,6 +3,47 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.6.1] — UNRELEASED
+
+### Fixed
+
+- **Query buffer truncation in player_stats upsert.** The session-flush
+  transaction's main `INSERT INTO player_stats … ON DUPLICATE KEY UPDATE …`
+  exceeded its 2048-byte `FormatEx` buffer after the schema grew through
+  migration 010, silently chopping the statement mid-keyword. Surfaced as
+  MySQL errors like `Unknown column 'damage_to_ta'`, `'VALUES'` → `'VALUE'`
+  → `'VALU'` → `'V'`, and `syntax error … near ''`. Whole transactions
+  were rejected, so session counters never persisted. Bumped the buffer
+  to 4096. Long-term fix tracked separately: switch the wide upserts to
+  parameterized queries. (#5)
+- **`tank_records.fk_tr_map` foreign-key violation on tank/witch spawn.**
+  `g_CurrentMapId` is resolved through an async `INSERT IGNORE INTO maps
+  → SELECT id` chain that only kicks off in `OnMapStart`. On a plugin
+  hot-reload or DB-late-connect mid-map, `g_CurrentMapId` stayed at 0 and
+  the first boss spawn after produced a foreign-key error against
+  `maps.id`. Three-part fix:
+    - The DB-ready callback (`OnServerLookup`) now triggers
+      `Bizzy_Identity_ResolveMap()` itself, so a late connect catches up.
+    - `Bizzy_Identity_ResolveMap()` refreshes `g_CurrentMap` from the
+      engine on every call (no longer relies on `OnMapStart` having
+      already populated it).
+    - Tank- and witch-spawn inserts now bail with `g_CurrentMapId == 0`
+      instead of attempting the FK-violating insert. (#5)
+- **Server-key persistence / `server_id` churn (#6).** The server key was
+  written via `BuildPath(Path_SM, "cfg/sourcemod/…")`, which resolves to
+  `addons/sourcemod/cfg/sourcemod/` — a directory that does not exist — so the
+  write silently failed and a fresh random key (hence a fresh `servers.id`) was
+  generated on every boot, fragmenting player stats across many `server_id`s.
+  The keyfile now lives in the writable SM `data/` dir, so the key persists and
+  the server keeps one stable `server_id` across restarts.
+- **Negative session score dropped the whole stat flush (#7).** A player who
+  ended a session with negative points (griefing / friendly fire, with
+  `negative_score` on) produced a negative `most_points_in_session`, but that
+  column is `INT UNSIGNED` — MySQL rejected the row with "Out of range value",
+  which failed the career-bests query and rolled back the entire
+  `Bizzy_Session_Flush` transaction, losing that session's stats. Clamp the
+  inserted value with `GREATEST(0, …)`; a negative career "best" is meaningless.
+
 ## [0.6.0] — 2026-05-25
 
 **First public release.** Built from scratch over a 2026-Q2 sprint as a

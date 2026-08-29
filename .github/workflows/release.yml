@@ -38,7 +38,11 @@ jobs:
           for c in python3 python python3.12 python3.11 python3.10; do
             if command -v "$c" >/dev/null 2>&1 \
                && "$c" -c "import sys" >/dev/null 2>&1; then
-              "$c" -m pip install --user --quiet -r schema/scripts/requirements.txt
+              # --break-system-packages: PEP 668 marks the runner's system
+              # Python as externally-managed, blocking a plain --user install.
+              # The flag bypasses that guard; with --user the install stays
+              # confined to the user site (~/.local), not system-wide.
+              "$c" -m pip install --user --break-system-packages --quiet -r schema/scripts/requirements.txt
               break
             fi
           done
@@ -74,7 +78,10 @@ jobs:
           cp docs/INSTALL.md README.md LICENSE            "$STAGE/" 2>/dev/null || true
 
           tar czf "$STAGE/source.tar.gz" plugin/scripting
-          zip -rq "$STAGE.zip" "$STAGE"
+          # Build $STAGE.zip with python3's stdlib zipfile rather than the `zip`
+          # binary, so the self-hosted runner doesn't need `zip` installed. This
+          # produces the same archive (entries prefixed with "$STAGE/").
+          python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', '.', sys.argv[1])" "$STAGE"
           echo "zip=$STAGE.zip" >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
