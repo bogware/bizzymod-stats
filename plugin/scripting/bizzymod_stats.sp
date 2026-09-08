@@ -126,10 +126,19 @@ public void OnPluginStart()
     Bizzy_OnMotdInit();
     Bizzy_OnCommandsInit();
 
-    // Admin menu (optional dep on adminmenu)
-    TopMenu menu = GetAdminTopMenu();
-    if (menu != null)
-        OnAdminMenuReady(menu);
+    // Admin menu (optional dep on adminmenu). Only query the native directly if
+    // the adminmenu library is loaded; otherwise the OnAdminMenuReady forward
+    // registers the menu when adminmenu (re)loads. Without this guard,
+    // GetAdminTopMenu() is an UNBOUND native whenever this plugin loads before
+    // adminmenu.smx — which happens inside the confoglcompmod match chain (loaded
+    // right after `sm plugins unload_all`, before adminmenu is refreshed) — and
+    // the unbound-native error aborts OnPluginStart, dropping the whole plugin.
+    if (LibraryExists("adminmenu"))
+    {
+        TopMenu menu = GetAdminTopMenu();
+        if (menu != null)
+            OnAdminMenuReady(menu);
+    }
 }
 
 public void OnAllPluginsLoaded()

@@ -3,6 +3,45 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.0] — UNRELEASED
+
+### Changed
+
+- **Versus stats now accrue PER CHAPTER, not per whole match.** In versus a
+  "match" is a whole campaign and almost never finishes (players leave near the
+  end), so `player_versus_stats` — which only rolled up at match close — stayed
+  empty in practice. It now rolls up at the close of each **chapter** (a map's
+  two halves, "play Survivor and Infected once"), inside the round-2 DB
+  transaction so the rollup sees both halves' `player_round_stats` atomically. A
+  completed chapter credits every player immediately, even if the match is later
+  abandoned. `maps_won`/`maps_lost` are the win/loss record (one per chapter);
+  win/loss streaks now count consecutive chapters.
+
+### Fixed
+
+- **Second versus half (round 2) was never recorded.** Half detection relied on
+  the `versus_round_start` event's `is_secondary_round` flag, which stays `false`
+  on this build, so every half tried to insert as round 1 and hit the
+  `match_rounds.uq_round_idx` unique key (`Duplicate entry 'N-1'`). Halves are now
+  counted from the engine `round_start` event with idempotency guards, so both
+  halves and the per-chapter winner are recorded. Chapters no longer sit
+  `incomplete`, and chapter winners are decided from plugin Survivor points (the
+  engine distance netprop reads 0 on this build; an engine-accurate winner is a
+  documented future refinement).
+- **First chapter of every match was silently dropped.** `OpenMatchMap()` ran
+  synchronously right after the async `OpenMatch()`, while `g_MatchId` was still
+  0, so the first chapter (its rounds and rollup) was lost. The first chapter is
+  now opened from the `OnMatchInserted` callback once `g_MatchId` is set.
+- **Plugin failed to load when an optional game event is absent.** Event hooks
+  used `HookEvent`, which throws (aborting `OnPluginStart`) if an event such as
+  `entered_checkpoint` doesn't exist on the running build. Switched to
+  `HookEventEx`, which skips a missing event instead of failing the plugin.
+- **`OnPluginStart` crash when `adminmenu` isn't loaded yet.** `GetAdminTopMenu()`
+  is called at startup; it is an unbound native when the plugin loads before
+  `adminmenu.smx` (e.g. inside a matchmode plugin-reload chain), aborting startup.
+  Now guarded with `LibraryExists("adminmenu")`; the `OnAdminMenuReady` forward
+  still wires the menu when `adminmenu` (re)loads.
+
 ## [0.6.1] — UNRELEASED
 
 ### Fixed
