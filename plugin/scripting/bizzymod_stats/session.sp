@@ -7,7 +7,32 @@
  * during the session and are flushed in one transaction at close.
  */
 
-void Bizzy_OnSessionInit() { /* nothing yet */ }
+void Bizzy_OnSessionInit()
+{
+    // The startup orphan-session sweep runs from identity.sp's OnServerLookup,
+    // once g_DB + g_ServerId are actually resolved (the DB connect is async, so
+    // there is nothing to sweep at plugin-init time).
+}
+
+// Close any sessions left open by a previous load on THIS server. Sessions are
+// otherwise only closed on the disconnect/mapchange path (Bizzy_Session_Flush),
+// so a server restart (the benign sm_RestartEmpty empty-restart) or a plugin
+// reload with sessions still open leaves those rows ended_at=NULL forever —
+// leaked rows that never captured combat and skew session counts. Called from
+// Bizzy_Identity's OnServerLookup the moment the server row resolves. The 60s
+// guard leaves a session a player opened seconds after boot untouched (mirrors
+// versus.sp's AbandonStaleMatchesForServer, which does the same for matches).
+void Bizzy_Session_SweepStale()
+{
+    if (g_DB == null || g_ServerId == 0) return;
+    char sql[256];
+    FormatEx(sql, sizeof sql,
+        "UPDATE sessions SET ended_at=NOW(), "
+        ... "duration_s=LEAST(GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW())), 21600) "
+        ... "WHERE server_id=%d AND ended_at IS NULL "
+        ... "AND started_at <= NOW() - INTERVAL 60 SECOND", g_ServerId);
+    Bizzy_DB_Exec(sql);
+}
 
 stock void Bizzy_BeginClientSession(int client)
 {

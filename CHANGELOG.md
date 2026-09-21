@@ -3,6 +3,34 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.2] — UNRELEASED
+
+### Fixed
+
+- **Leaked open sessions on server restart.** Sessions were only closed on the
+  disconnect/mapchange path, so a server restart (the benign sm_RestartEmpty
+  empty-restart) or a plugin reload with sessions still open left those rows with
+  `ended_at=NULL` forever — pure data loss (the leaked rows never captured combat,
+  and they skewed session counts / "currently online" logic). Added a one-shot
+  startup sweep in `Bizzy_OnSessionInit` mirroring `AbandonStaleMatchesForServer`:
+  it closes this server's dangling sessions once `g_ServerId` resolves (with a 60s
+  guard so a freshly-opened session isn't caught). One deploy also clears the
+  existing backlog (97 stale rows on the Dugout at time of writing).
+
+## [0.7.1] — UNRELEASED
+
+### Fixed
+
+- **Bizzy's Dugout recorded no versus stats at all.** Its realism-versus runs as
+  `mp_gamemode "mutation12"` (vscript_replacer swaps `mutation12` →
+  `bizzymodRealism`), which `Bizzy_DetectGameMode()` classified as plain
+  `GameMode_Mutation` — so `Bizzy_Versus_OnMapStart()` returned early and never
+  opened a match. Days of live play (297 sessions) produced zero match/chapter
+  rows. Added the `bizzymod_stats_versus_mutations` cvar (default `"mutation12"`):
+  any listed mutation gamemode is now recorded as Realism-Versus, so per-chapter
+  versus recording engages. Sessions were always captured; only the versus layer
+  was dormant.
+
 ## [0.7.0] — UNRELEASED
 
 ### Changed
