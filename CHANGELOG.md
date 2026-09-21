@@ -3,6 +3,36 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.4] — UNRELEASED
+
+### Changed
+
+- **Match win/loss now decides on the cumulative lead once ≥2 chapters complete,
+  not on reaching the finale.** Whole campaigns almost never finish, so keying
+  match W/L on the finale gave it a near-zero hit rate. A match now records a
+  win/loss (from the cumulative survivor-score lead across the campaign) as soon
+  as two chapters have completed both halves; fewer than two completed chapters
+  is `abandoned` (no W/L), regardless of how the match ended. The pure
+  per-chapter aggregate — `maps_won` / `maps_lost`, i.e. the user-facing "Round"
+  win/loss — is unchanged and still credited independently at each chapter close.
+- **Dropped the dead `rounds_won` / `rounds_lost` columns** from the
+  `player_versus_stats` rollup: a versus half has no individual winner (the
+  chapter is decided by comparing the two halves), so these were always 0 and
+  made `round_winrate_pct` read 0%. The plugin no longer writes them; migration
+  007 drops the columns and recomputes the round win-rate view from
+  `maps_won` / `maps_lost`.
+
+### Fixed
+
+- **Career stats collapsed under `server_id=0`.** All five `player_stats`
+  upserts in the session flush hardcoded `server_id` to the literal `0` instead
+  of the resolved `g_ServerId`, so every server's coop career rollups piled into
+  one dangling `server_id=0` row and per-server leaderboards were impossible
+  (`player_stats` PK is `player_id, gamemode_id, difficulty_id, server_id`).
+  Now keyed to the real server id. Historical `server_id=0` rows are left as a
+  legacy blob (they aggregated all servers and can't be split back); global
+  views still sum correctly and new sessions attribute per-server.
+
 ## [0.7.3] — UNRELEASED
 
 ### Fixed

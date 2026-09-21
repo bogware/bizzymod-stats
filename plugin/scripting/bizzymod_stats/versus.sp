@@ -76,6 +76,7 @@ bool g_MapIdFresh          = false; // g_CurrentMapId is resolved for the CURREN
 bool g_RoundPending        = false; // a round_start arrived before the chapter's id landed
 char g_ChapterMapName[128] = "";    // engine map NAME of the open chapter (boundary key)
 int  g_MatchMapOrdinal     = 0;     // chapter number within the match (1..N)
+int  g_MatchCompleteChapters = 0;   // chapters that finished BOTH halves (gates match W/L)
 int  g_MapRoundOrdinal     = 0;     // halves opened on the CURRENT chapter (0,1,2)
 int  g_RoundId             = 0;
 int  g_RoundIndex          = 0;     // 0=between, 1 or 2 during a half
@@ -127,7 +128,7 @@ stock void Bizzy_Versus_OnMapStart()
 
     if (!g_VersusActive)
     {
-        if (g_MatchId != 0) CloseMatch("mode_change", 'X');
+        if (g_MatchId != 0) CloseMatch("mode_change");
         g_ChapterPending = false;
         return;
     }
@@ -144,7 +145,7 @@ stock void Bizzy_Versus_OnMapStart()
     {
         // Different campaign — previous match is over. (Empty campaign = unknown
         // map name; do NOT force a change on it, that would split one match.)
-        CloseMatch("campaign_change", 0);
+        CloseMatch("campaign_change");
         OpenMatch(campaign);
         g_ChapterPending = true;
     }
@@ -193,6 +194,7 @@ static void OpenMatch(const char[] campaign)
     g_ChapterMapName[0] = '\0';
     g_ChapterFirstHalfSurv = '\0';
     g_MatchMapOrdinal = 0;
+    g_MatchCompleteChapters = 0;
     g_MapRoundOrdinal = 0;
     g_RoundId = 0;
     g_RoundIndex = 0;
@@ -236,18 +238,26 @@ static void OnMatchInserted(Database db, DBResultSet rs, const char[] error, any
     TryOpenPendingChapter();
 }
 
-static void CloseMatch(const char[] reason, int winnerChar)
+static void CloseMatch(const char[] reason)
 {
     if (g_MatchId == 0) return;
 
     // Commit a still-open half, then flush the still-open chapter, BEFORE deciding
-    // the winner so the final chapter is captured and folded into the score.
+    // the winner so the final chapter is captured and folded into the score (and
+    // g_MatchCompleteChapters reflects the final count).
     if (g_RoundIndex != 0)
         CloseRound(0, 0, 0);
     if (g_MatchMapId != 0)
         FlushOpenMap();
 
-    int wn = (winnerChar == 0) ? DecideMatchWinner() : winnerChar;
+    // A match produces a WIN/LOSS only if at least 2 chapters completed both halves
+    // — then the winner is the cumulative survivor-score lead across the campaign.
+    // Fewer than 2 completed chapters => 'abandoned' (no W/L), regardless of why it
+    // ended. Whole campaigns rarely finish, so gating on chapters (not the finale)
+    // gives match W/L a usable hit rate while keeping it meaningful. The pure
+    // per-chapter aggregate (maps_won / maps_lost = the user-facing "Round" W/L) is
+    // credited independently at each chapter close.
+    int wn = (g_MatchCompleteChapters >= 2) ? DecideMatchWinner() : 'X';
     char winnerEnum[16];
     if      (wn == 'A')  strcopy(winnerEnum, sizeof winnerEnum, "A");
     else if (wn == 'B')  strcopy(winnerEnum, sizeof winnerEnum, "B");
@@ -296,6 +306,7 @@ static void CloseMatch(const char[] reason, int winnerChar)
     g_ChapterMapName[0] = '\0';
     g_ChapterFirstHalfSurv = '\0';
     g_MatchMapOrdinal = 0;
+    g_MatchCompleteChapters = 0;
     g_MapRoundOrdinal = 0;
     g_RoundId = 0;
     g_RoundIndex = 0;
@@ -465,6 +476,7 @@ static void AppendMapCloseAndRollup(Transaction t)
 
     if (complete)
     {
+        g_MatchCompleteChapters++;
         FormatEx(sql, sizeof sql,
             "UPDATE matches SET maps_played=maps_played+1 WHERE id=%d", g_MatchId);
         t.AddQuery(sql);
@@ -488,11 +500,10 @@ static void AppendPlayerVersusRollupForMap(Transaction t, int mapId, int winnerC
         char sql[2048];
         FormatEx(sql, sizeof sql,
             "INSERT INTO player_versus_stats "
-            ... "(player_id, gamemode_id, maps_won, maps_lost, rounds_played, rounds_won, rounds_lost, "
+            ... "(player_id, gamemode_id, maps_won, maps_lost, rounds_played, "
             ... " rounds_as_surv, rounds_as_inf, total_round_score_surv, total_round_score_inf, "
             ... " current_win_streak, longest_win_streak, current_loss_streak, longest_loss_streak, last_match_at) "
             ... "SELECT prs.player_id, %d, %d, %d, COUNT(*), "
-            ... "       0, 0, "
             ... "       SUM(prs.side=2), SUM(prs.side=3), "
             ... "       SUM(IF(prs.side=2, prs.points, 0)), SUM(IF(prs.side=3, prs.points, 0)), "
             ... "       %d, %d, %d, %d, NOW() "
@@ -504,8 +515,6 @@ static void AppendPlayerVersusRollupForMap(Transaction t, int mapId, int winnerC
             ... " maps_won               = maps_won               + VALUES(maps_won), "
             ... " maps_lost              = maps_lost              + VALUES(maps_lost), "
             ... " rounds_played          = rounds_played          + VALUES(rounds_played), "
-            ... " rounds_won             = rounds_won             + VALUES(rounds_won), "
-            ... " rounds_lost            = rounds_lost            + VALUES(rounds_lost), "
             ... " rounds_as_surv         = rounds_as_surv         + VALUES(rounds_as_surv), "
             ... " rounds_as_inf          = rounds_as_inf          + VALUES(rounds_as_inf), "
             ... " total_round_score_surv = total_round_score_surv + VALUES(total_round_score_surv), "
@@ -850,7 +859,7 @@ static void CloseRound(int reason, int winnerTeam, int engineScore)
 static void Event_VMatchFinished(Event event, const char[] name, bool dontBroadcast)
 {
     if (g_MatchId == 0) return;
-    CloseMatch("finale", 0);
+    CloseMatch("finale");
 }
 
 static void Event_VMapTransition(Event event, const char[] name, bool dontBroadcast)
