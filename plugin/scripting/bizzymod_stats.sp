@@ -47,6 +47,7 @@ ConVar g_cvDifficultyMultiplier;
 ConVar g_cvEnableNegativeScore;
 ConVar g_cvLogEvents;
 ConVar g_cvBotMultiplier;       // declared for future bot-related penalty scaling
+ConVar g_cvVersusMutations;     // mutation gamemodes to record as Realism-Versus (Dugout: "mutation12")
 
 // -----------------------------------------------------------------------------
 // Module sources. Order matters only for compile-time symbol resolution;
