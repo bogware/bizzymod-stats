@@ -181,6 +181,8 @@ public void OnClientDisconnect(int client)
 {
     if (IsFakeClient(client) || !g_Clients[client].inUse)
         return;
+    // Drop the versus team letter first so a reused client slot can't inherit it.
+    Bizzy_Versus_OnClientDisconnect(client);
     Bizzy_EndClientSession(client);
 }
 

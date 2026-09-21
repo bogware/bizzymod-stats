@@ -3,6 +3,32 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.3] — UNRELEASED
+
+### Fixed
+
+- **Versus chapters split into ghost maps; survivor team never flipped.** Two
+  linked state-machine defects corrupted per-chapter versus stats (`maps_won` /
+  `maps_lost` ~50% low, `player_versus_stats` undercounting, wrong chapter
+  winners). (1) **Ghost `match_maps`.** On mutation12 the engine fires
+  `OnMapStart` more than once per chapter (a scenario restart between the two
+  halves, and often another after them), and the plugin opened a `match_map` on
+  each — so every real chapter became a 2-round map plus one or more empty
+  duplicates with the same `map_id`. Chapters are now gated on the engine
+  `map_id` (`g_ChapterMapId`): a new `match_map` opens only when the map actually
+  changes; same-map restarts are ignored and the two halves are gated by the
+  round counter. (2) **`survivor_team` didn't alternate.** The engine's per-half
+  side swap races `round_start` on this build (some halves already swapped, some
+  not), so reading sides at `round_start` was often stale and recorded both
+  halves of a chapter on the same team — piling all survivor points onto one
+  side and deciding the winner wrong. Sides and the survivor team are now read
+  **fresh at `round_end`**, where the half's sides have settled; team letters are
+  anchored once per match (from the first half) and never auto-reassigned on the
+  routine per-half swap. Also guards a duplicate match open when a scenario
+  restart lands in the async gap before the `matches` row returns. The corrupt
+  historical `player_versus_stats` rollup is truncated on deploy (only a handful
+  of gm5 matches; not migrated) and repopulates correctly from new matches.
+
 ## [0.7.2] — UNRELEASED
 
 ### Fixed

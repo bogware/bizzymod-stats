@@ -228,5 +228,11 @@ static void OnMapUpsert(Database db, DBResultSet rs, const char[] error, any dat
 static void OnMapLookup(Database db, DBResultSet rs, const char[] error, any data)
 {
     if (rs != null && rs.FetchRow())
+    {
         g_CurrentMapId = rs.FetchInt(0);
+        // g_CurrentMapId is now FRESH for the current engine map. The versus
+        // module gates chapter opens on this (it can't trust the id during the
+        // synchronous OnMapStart, where it's still the previous chapter's id).
+        Bizzy_Versus_OnMapIdResolved();
+    }
 }
