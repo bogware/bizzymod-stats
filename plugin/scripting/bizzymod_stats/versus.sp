@@ -18,9 +18,18 @@
  * vs g_ChapterMapName), but the match_maps row is only opened once the id is
  * actually resolved. The open is driven by TryOpenPendingChapter(), called from
  * BOTH OnMapLookup (id ready) and OnMatchInserted (match id ready) — whichever
- * lands last opens the chapter. Latches (g_ChapterPending / g_RoundPending /
+ * lands last opens the chapter. Latches (g_ChapterPending / g_RoundLivePending /
  * g_ChapterOpening / g_MapIdFresh) bridge the async gaps so no chapter or half is
  * dropped because an id hadn't landed yet.
+ *
+ * ── Round liveness (real half vs phantom) ──
+ * mutation12 fires spurious round_starts during ready-up / the scenario restart
+ * BETWEEN a chapter's two survivor runs. A round_start only opens a CANDIDATE
+ * window; it is counted as a real half (ordinal + match_rounds row) only once it
+ * goes LIVE — survivors leave the saferoom (player_left_start_area) or real combat
+ * happens. A phantom never goes live, so at round_end it is discarded without
+ * consuming the chapter's 2-half quota — which is what lets the real SECOND
+ * survivor run be captured instead of being blocked.
  *
  * ── Chapter boundaries (map NAME) ──
  * On mutation12 the engine fires OnMapStart more than once per chapter (a scenario
@@ -73,13 +82,15 @@ int  g_MatchMapId          = 0;
 bool g_ChapterOpening      = false; // match_maps INSERT dispatched, awaiting OnMatchMapInserted
 bool g_ChapterPending      = false; // a chapter should (re)open once match_id + map_id are ready
 bool g_MapIdFresh          = false; // g_CurrentMapId is resolved for the CURRENT engine map
-bool g_RoundPending        = false; // a round_start arrived before the chapter's id landed
 char g_ChapterMapName[128] = "";    // engine map NAME of the open chapter (boundary key)
 int  g_MatchMapOrdinal     = 0;     // chapter number within the match (1..N)
 int  g_MatchCompleteChapters = 0;   // chapters that finished BOTH halves (gates match W/L)
 int  g_MapRoundOrdinal     = 0;     // halves opened on the CURRENT chapter (0,1,2)
 int  g_RoundId             = 0;
-int  g_RoundIndex          = 0;     // 0=between, 1 or 2 during a half
+int  g_RoundIndex          = 0;     // LIVE half index (1 or 2); 0 = no live half open
+bool g_RoundActive         = false; // a round_start fired; inside the round_start..round_end window
+bool g_RoundLive           = false; // survivors went LIVE (left saferoom / real combat) = a real half
+bool g_RoundLivePending    = false; // went live before the chapter's match_map id was ready
 char g_SurvivorTeam        = '\0';  // letter on Survivors THIS half
 char g_ChapterFirstHalfSurv = '\0'; // survivor letter of the chapter's first half (for forced flip)
 char g_MatchCampaign[64]   = "";
@@ -110,6 +121,11 @@ void Bizzy_OnVersusInit()
     HookEventEx("tank_spawn",            Event_VTankSpawn,  EventHookMode_PostNoCopy);
     HookEventEx("witch_spawn",           Event_VWitchSpawn, EventHookMode_PostNoCopy);
     HookEventEx("map_transition",        Event_VMapTransition, EventHookMode_PostNoCopy);
+    // "Round went LIVE" signal: survivors leaving the start saferoom. A ready-up /
+    // scenario-restart phantom round_start never fires this, so it's how we tell a
+    // real half from a phantom (combat is the fallback — see MarkRoundLive).
+    HookEventEx("player_left_start_area",  Event_VRoundWentLive, EventHookMode_PostNoCopy);
+    HookEventEx("player_left_safe_area",   Event_VRoundWentLive, EventHookMode_PostNoCopy);
 
     AbandonStaleMatchesForServer();
 }
@@ -189,7 +205,6 @@ static void OpenMatch(const char[] campaign)
     g_MatchOpening = true;
     g_MatchAnchored = false;
     g_ChapterOpening = false;
-    g_RoundPending = false;
     g_MatchMapId = 0;
     g_ChapterMapName[0] = '\0';
     g_ChapterFirstHalfSurv = '\0';
@@ -198,6 +213,9 @@ static void OpenMatch(const char[] campaign)
     g_MapRoundOrdinal = 0;
     g_RoundId = 0;
     g_RoundIndex = 0;
+    g_RoundActive = false;
+    g_RoundLive = false;
+    g_RoundLivePending = false;
     g_TeamScoreA = 0;
     g_TeamScoreB = 0;
     g_SurvivorTeam = '\0';
@@ -245,7 +263,7 @@ static void CloseMatch(const char[] reason)
     // Commit a still-open half, then flush the still-open chapter, BEFORE deciding
     // the winner so the final chapter is captured and folded into the score (and
     // g_MatchCompleteChapters reflects the final count).
-    if (g_RoundIndex != 0)
+    if (g_RoundActive)
         CloseRound(0, 0, 0);
     if (g_MatchMapId != 0)
         FlushOpenMap();
@@ -300,7 +318,6 @@ static void CloseMatch(const char[] reason)
     g_MatchAnchored = false;
     g_ChapterOpening = false;
     g_ChapterPending = false;
-    g_RoundPending = false;
     g_MapIdFresh = false;
     g_MatchMapId = 0;
     g_ChapterMapName[0] = '\0';
@@ -310,6 +327,9 @@ static void CloseMatch(const char[] reason)
     g_MapRoundOrdinal = 0;
     g_RoundId = 0;
     g_RoundIndex = 0;
+    g_RoundActive = false;
+    g_RoundLive = false;
+    g_RoundLivePending = false;
     g_MatchCampaign[0] = '\0';
 }
 
@@ -346,7 +366,7 @@ static void TryOpenPendingChapter()
 
     // Genuine new chapter. Close a dangling half + the previous chapter first so we
     // never leak an open round across the boundary (mirrors Event_VMapTransition).
-    if (g_RoundIndex != 0)
+    if (g_RoundActive)
         CloseRound(0, 0, 0);
     if (g_MatchMapId != 0)
         FlushOpenMap();
@@ -392,19 +412,16 @@ static void OnMatchMapInserted(Database db, DBResultSet rs, const char[] error, 
         // Make the chapter re-openable: clear the name guard + any latched round so
         // the next OnMapStart/OnMapLookup (a mutation12 scenario restart) retries.
         g_ChapterMapName[0] = '\0';
-        g_RoundPending = false;
+        g_RoundLivePending = false;
         g_ChapterPending = true;
         return;
     }
     g_MatchMapId = rs.InsertId;
 
-    // A round_start that arrived before the id landed was latched — open it now.
-    if (g_RoundPending && g_RoundIndex == 0 && g_MapRoundOrdinal < 2)
-    {
-        g_RoundPending = false;
-        g_MapRoundOrdinal++;
-        OpenRound(g_MapRoundOrdinal);
-    }
+    // A round that went LIVE before the chapter id landed was latched (ordinal already
+    // consumed in MarkRoundLive) — insert its match_rounds row now.
+    if (g_RoundLivePending && g_RoundLive)
+        InsertLiveRound();
 
     // A newer chapter may have been waiting on this insert to complete.
     TryOpenPendingChapter();
@@ -548,42 +565,26 @@ static void FlushOpenMap()
 // Round (half) lifecycle
 // -----------------------------------------------------------------------------
 
+// A round_start opens a CANDIDATE window. It is NOT counted as a real half (no DB
+// row, no ordinal consumed) until it goes LIVE — survivors leave the saferoom
+// (primary) or real combat happens (fallback). mutation12 fires spurious
+// round_starts during ready-up / scenario restarts between the two survivor runs;
+// those never go live, so they no longer eat the chapter's 2-half quota or drop the
+// real second run.
 static void Event_VRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-    if (!g_VersusActive) return;
+    if (!g_VersusActive || g_MatchId == 0) return;
+    if (g_RoundActive) return;   // already inside a round window (duplicate round_start)
 
-    if (g_MatchMapId != 0)
-    {
-        // Chapter open — normal path.
-        if (g_RoundIndex != 0) return;       // half already open
-        if (g_MapRoundOrdinal >= 2) return;  // chapter already had its two halves
-        g_MapRoundOrdinal++;
-        OpenRound(g_MapRoundOrdinal);
-        return;
-    }
-
-    // No open chapter yet. The chapter open is async (the map_id must resolve, THEN
-    // the match_maps INSERT round-trips), which can lag a fast round_start. Latch
-    // this half so the async open path (OnMatchMapInserted) picks it up — covering
-    // BOTH the insert-in-flight window (g_ChapterOpening) and the earlier
-    // pending-on-resolve window (a genuinely new map still waiting on its id / the
-    // pre-match window). IGNORE a stray round_start between chapters: a same-map
-    // restart after a chapter closed, or no match at all.
-    bool matchComing   = (g_MatchId != 0) || g_MatchOpening;
-    bool chapterComing = g_ChapterOpening
-                      || (g_ChapterPending && !StrEqual(g_CurrentMap, g_ChapterMapName));
-    if (matchComing && chapterComing && g_RoundIndex == 0 && g_MapRoundOrdinal < 2)
-        g_RoundPending = true;
-}
-
-static void OpenRound(int roundIndex)
-{
-    g_RoundIndex      = roundIndex;
-    g_RoundStartEpoch = Bizzy_NowEpoch();
-    g_TankAppearedRound = false;
+    g_RoundActive        = true;
+    g_RoundLive          = false;
+    g_RoundLivePending   = false;
+    g_RoundId            = 0;
+    g_RoundStartEpoch    = Bizzy_NowEpoch();
+    g_TankAppearedRound  = false;
     g_WitchAppearedRound = false;
-    g_FirstBloodFired = false;
-    g_FirstDownFired = false;
+    g_FirstBloodFired    = false;
+    g_FirstDownFired     = false;
 
     for (int i = 1; i <= MaxClients; i++)
     {
@@ -599,13 +600,64 @@ static void OpenRound(int roundIndex)
         g_RoundClients[i].side = (IsClientInGame(i) && !IsFakeClient(i))
             ? GetClientTeam(i) : 0;
     }
+}
 
-    // Provisional survivor_team for the INSERT; CloseRound rewrites it. The two
-    // halves alternate, so half 2's provisional is the flip of half 1's.
+// The saferoom-leave events fire when survivors go live.
+static void Event_VRoundWentLive(Event event, const char[] name, bool dontBroadcast)
+{
+    if (g_VersusActive && g_MatchId != 0)
+        Bizzy_Versus_MarkRoundLive();
+}
+
+// Promote the current candidate round to a REAL half: consume an ordinal slot and
+// insert its match_rounds row. Idempotent; called from the saferoom-leave events
+// and (fallback) from the first real combat in the round. A phantom never reaches
+// here, so it stays uncounted and gets discarded at round_end.
+void Bizzy_Versus_MarkRoundLive()
+{
+    if (!g_RoundActive || g_RoundLive) return;
+    if (g_MapRoundOrdinal >= 2) return;   // chapter already has its two live halves
+
+    g_RoundLive  = true;
+    g_MapRoundOrdinal++;
+    g_RoundIndex = g_MapRoundOrdinal;      // 1 or 2
+
+    if (g_MatchMapId == 0)
+    {
+        // Chapter's match_map id hasn't resolved yet — insert when it lands
+        // (OnMatchMapInserted honors g_RoundLivePending).
+        g_RoundLivePending = true;
+        return;
+    }
+    InsertLiveRound();
+}
+
+// Combat is a FALLBACK "went live" signal (used only if the saferoom-leave events
+// don't fire on this build). Gate it on a minimum elapsed time: a between-runs
+// phantom lives and dies in ~0 seconds, so an instant / stray / queued combat event
+// (saferoom FF, a delayed player_hurt from the previous run, a molotov tick) inside
+// a phantom window must NOT promote it — that would re-drop the real second run. A
+// real half runs for minutes with continuous combat, so it still promotes (~15s in)
+// even when the saferoom-leave event is missing. Survivors leaving the saferoom
+// (Event_VRoundWentLive) is airtight and promotes immediately, without this gate.
+static void MaybeMarkLiveFromCombat()
+{
+    if (!g_RoundActive || g_RoundLive) return;
+    if (Bizzy_NowEpoch() - g_RoundStartEpoch < 15) return;   // too soon — could still be a phantom
+    Bizzy_Versus_MarkRoundLive();
+}
+
+static void InsertLiveRound()
+{
+    if (g_MatchMapId == 0) return;
+    g_RoundLivePending = false;
+
+    // Provisional survivor_team for the INSERT; CloseRound rewrites it from the
+    // settled sides. The two halves alternate, so half 2's guess flips half 1's.
     char guess;
     if (!g_MatchAnchored)
         guess = 'A';
-    else if (roundIndex == 2 && g_ChapterFirstHalfSurv != '\0')
+    else if (g_RoundIndex == 2 && g_ChapterFirstHalfSurv != '\0')
         guess = (g_ChapterFirstHalfSurv == 'A') ? 'B' : 'A';
     else
     {
@@ -618,13 +670,14 @@ static void OpenRound(int roundIndex)
     }
     g_SurvivorTeam = guess;
 
-    if (g_MatchMapId == 0) { LogError("[bizzymod-stats] OpenRound with no match_map_id"); return; }
+    LogMessage("[bizzymod-stats] round LIVE: match=%d chapter=%d half=%d surv~%c",
+        g_MatchId, g_MatchMapOrdinal, g_RoundIndex, guess);
 
     char sql[384];
     FormatEx(sql, sizeof sql,
         "INSERT INTO match_rounds (match_id, match_map_id, round_index, survivor_team, started_at) "
         ... "VALUES (%d, %d, %d, '%c', NOW())",
-        g_MatchId, g_MatchMapId, roundIndex, g_SurvivorTeam);
+        g_MatchId, g_MatchMapId, g_RoundIndex, g_SurvivorTeam);
     g_DB.Query(OnRoundInserted, sql);
 }
 
@@ -668,7 +721,7 @@ static void OnRoundInserted(Database db, DBResultSet rs, const char[] error, any
 
 static void Event_VRoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
-    if (!g_VersusActive || g_MatchId == 0 || g_RoundIndex == 0) return;
+    if (!g_VersusActive || g_MatchId == 0 || !g_RoundActive) return;
 
     int reason = event.GetInt("reason", 0);
     int winner = event.GetInt("winner", 0);
@@ -679,27 +732,53 @@ static void Event_VRoundEnd(Event event, const char[] name, bool dontBroadcast)
 
 static void CloseRound(int reason, int winnerTeam, int engineScore)
 {
+    if (!g_RoundActive) return;   // no round window open
+
+    // PHANTOM: a candidate round that never went live (ready-up / scenario restart).
+    // It consumed no ordinal and inserted no row, so just close the window. This is
+    // exactly what lets the real second survivor run land instead of being blocked.
+    if (!g_RoundLive)
+    {
+        LogMessage("[bizzymod-stats] round discarded (never went live): match=%d chapter=%d",
+            g_MatchId, g_MatchMapOrdinal);
+        g_RoundActive = false;
+        return;
+    }
+
     int closedIndex = g_RoundIndex;
 
     if (g_RoundId == 0)
     {
-        // The match_rounds INSERT hadn't landed (near-impossible: a half is minutes,
-        // the insert is milliseconds). Don't WEDGE the machine (clear g_RoundIndex so
-        // the next round_start isn't blocked), and keep the chapter consistent:
-        // preserve half 1's letter so half 2 can still FORCE the flip; for a half-2
-        // miss, abandon the chapter's completion so a later flush can't score it
-        // 'complete' off half-1 data only.
-        if (closedIndex == 1 && g_ChapterFirstHalfSurv == '\0')
+        // Live half whose match_rounds INSERT hasn't landed (livePending never
+        // resolved to a chapter id, or a same-second race). Don't wedge; keep the
+        // chapter consistent.
+        if (g_RoundLivePending)
+        {
+            // Never inserted — give its ordinal slot back so the chapter isn't
+            // wrongly "complete", and preserve half-1's letter for the flip.
+            if (closedIndex == 1 && g_ChapterFirstHalfSurv == '\0')
+            {
+                if (g_SurvivorTeam != '\0') g_ChapterFirstHalfSurv = g_SurvivorTeam;
+                else                        g_ChapterFirstHalfSurv = 'A';
+            }
+            if (g_MapRoundOrdinal > 0) g_MapRoundOrdinal--;
+        }
+        else if (closedIndex == 2)
+        {
+            // Half-2's row was dispatched but its id never landed (a multi-minute DB
+            // stall spanning the whole half — realistically unreachable). Best-effort:
+            // still close + roll up the chapter off whatever landed, rather than
+            // orphaning an open match_maps row and losing the W/L credit.
+            FlushOpenMap();
+        }
+        else if (closedIndex == 1 && g_ChapterFirstHalfSurv == '\0')
         {
             if (g_SurvivorTeam != '\0') g_ChapterFirstHalfSurv = g_SurvivorTeam;
             else                        g_ChapterFirstHalfSurv = 'A';
         }
-        if (closedIndex == 2)
-        {
-            g_MatchMapId = 0;
-            g_MapRoundOrdinal = 0;
-            g_ChapterFirstHalfSurv = '\0';
-        }
+        g_RoundActive = false;
+        g_RoundLive = false;
+        g_RoundLivePending = false;
         g_RoundIndex = 0;
         return;
     }
@@ -843,9 +922,12 @@ static void CloseRound(int reason, int winnerTeam, int engineScore)
 
     Bizzy_DB_RunTxn(t);
 
-    LogMessage("[bizzymod-stats] round closed: match=%d chapter=%d half=%d surv_team=%c surv_pts=%d inf_pts=%d survleft=%d",
-        g_MatchId, g_MatchMapOrdinal, closedIndex, survLetter, sumSurv, sumInf, survLeft);
+    LogMessage("[bizzymod-stats] round closed: match=%d chapter=%d half=%d surv_team=%c surv_pts=%d inf_pts=%d survleft=%d dur=%d",
+        g_MatchId, g_MatchMapOrdinal, closedIndex, survLetter, sumSurv, sumInf, survLeft, duration);
 
+    g_RoundActive = false;
+    g_RoundLive = false;
+    g_RoundLivePending = false;
     g_RoundId = 0;
     g_RoundIndex = 0;
     if (closedIndex == 2)
@@ -864,7 +946,7 @@ static void Event_VMatchFinished(Event event, const char[] name, bool dontBroadc
 
 static void Event_VMapTransition(Event event, const char[] name, bool dontBroadcast)
 {
-    if (g_RoundIndex != 0)
+    if (g_RoundActive)
         CloseRound(0, 0, 0);
     if (g_MatchMapId != 0)
         FlushOpenMap();
@@ -886,12 +968,12 @@ static void Event_VPlayerTeam(Event event, const char[] name, bool dontBroadcast
 
 static void Event_VTankSpawn(Event event, const char[] name, bool dontBroadcast)
 {
-    if (g_RoundIndex != 0) g_TankAppearedRound = true;
+    if (g_RoundActive) g_TankAppearedRound = true;
 }
 
 static void Event_VWitchSpawn(Event event, const char[] name, bool dontBroadcast)
 {
-    if (g_RoundIndex != 0) g_WitchAppearedRound = true;
+    if (g_RoundActive) g_WitchAppearedRound = true;
 }
 
 // -----------------------------------------------------------------------------
@@ -969,13 +1051,14 @@ static void UpdatePlayerVersusMatchTotals(int winnerChar)
 
 stock void Bizzy_Versus_AccumScore(int client, int points)
 {
-    if (g_RoundIndex == 0) return;
+    if (!g_RoundActive) return;
     g_RoundClients[client].points += points;
 }
 
 stock void Bizzy_Versus_AccumKill(int client, bool isDeath = false)
 {
-    if (g_RoundIndex == 0) return;
+    if (!g_RoundActive) return;
+    MaybeMarkLiveFromCombat();   // fallback liveness signal (elapsed-gated vs phantoms)
     if (isDeath)
     {
         g_RoundClients[client].deaths++;
@@ -1002,7 +1085,8 @@ stock void Bizzy_Versus_AccumKill(int client, bool isDeath = false)
 
 stock void Bizzy_Versus_AccumDamage(int attacker, int victim, int damage, bool friendly)
 {
-    if (g_RoundIndex == 0) return;
+    if (!g_RoundActive) return;
+    MaybeMarkLiveFromCombat();   // fallback liveness signal (elapsed-gated vs phantoms)
     if (Bizzy_IsValidPlayer(attacker))
     {
         g_RoundClients[attacker].damageDealt += damage;
@@ -1014,13 +1098,13 @@ stock void Bizzy_Versus_AccumDamage(int attacker, int victim, int damage, bool f
 
 stock void Bizzy_Versus_AccumIncap(int client)
 {
-    if (g_RoundIndex == 0) return;
+    if (!g_RoundActive) return;
     g_RoundClients[client].incaps++;
 }
 
 stock void Bizzy_Versus_AccumAward(int client)
 {
-    if (g_RoundIndex == 0) return;
+    if (!g_RoundActive) return;
     g_RoundClients[client].awards++;
 }
 

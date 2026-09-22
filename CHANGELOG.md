@@ -3,6 +3,28 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.5] — UNRELEASED
+
+### Fixed
+
+- **Only one of a chapter's two survivor runs was recorded; the second half was
+  dropped as an empty phantom.** On mutation12 the engine fires extra `round_start`
+  events during ready-up and the scenario restart *between* a chapter's two survivor
+  runs. The plugin counted each `round_start` as a half, so a 0-second phantom
+  filled the "round 2" slot, prematurely completed+closed the chapter, and the
+  real second run (same map name) was then rejected — so half the versus play, and
+  every chapter's true winner, was lost. (This pre-dated the 0.7.3 rework, which
+  merely exposed it by no longer copying round 1's data into the phantom.) A
+  `round_start` now opens only a **candidate** window; it is counted as a real half
+  — consuming an ordinal slot and inserting its `match_rounds` row — only once it
+  goes **live**: survivors leave the saferoom (`player_left_start_area`, the signal
+  the competitive stack uses) or real combat occurs (fallback). A phantom never
+  goes live, so at `round_end` it is discarded without touching the chapter, which
+  lets the real second run land as round 2. Both halves of each chapter are now
+  captured with correct, opposite `survivor_team` and per-player sides (which also
+  removes the team-letter drift that mis-credited some chapters). Logs each round's
+  live/discard/close for validation.
+
 ## [0.7.4] — UNRELEASED
 
 ### Changed
