@@ -102,6 +102,12 @@ int  g_TeamScoreB          = 0;
 int  g_MatchMapPluginA     = 0; // plugin Survivor points on current chapter (drives the winner)
 int  g_MatchMapPluginB     = 0;
 
+// ReadyUp's IsInReady() native — forward-declared and marked OPTIONAL in
+// AskPluginLoad2 so this multi-mode plugin still loads on coop servers that don't
+// run readyup.smx. Used only to suppress the combat liveness fallback during the
+// ready-up window between a chapter's two runs (see MaybeMarkLiveFromCombat).
+native bool IsInReady();
+
 bool g_TankAppearedRound   = false;
 bool g_WitchAppearedRound  = false;
 bool g_FirstBloodFired     = false;
@@ -640,9 +646,25 @@ void Bizzy_Versus_MarkRoundLive()
 // real half runs for minutes with continuous combat, so it still promotes (~15s in)
 // even when the saferoom-leave event is missing. Survivors leaving the saferoom
 // (Event_VRoundWentLive) is airtight and promotes immediately, without this gate.
+// True while the server is in the ready-up window (readyup.smx). Coop-safe: the
+// native is optional, so on a server without readyup this returns false and the
+// fallback behaves exactly as before.
+static bool Bizzy_Versus_InReadyUp()
+{
+    return GetFeatureStatus(FeatureType_Native, "IsInReady") == FeatureStatus_Available
+        && IsInReady();
+}
+
 static void MaybeMarkLiveFromCombat()
 {
     if (!g_RoundActive || g_RoundLive) return;
+    // Ready-up is exactly the window where between-runs phantoms live. Real halves
+    // only go live AFTER ready-up ends (survivors then leave the saferoom — the
+    // airtight primary signal). So never let combat during ready-up promote a
+    // candidate: saferoom friendly-fire, a stray/queued hit from the previous run,
+    // or an FF kill can otherwise eat the chapter's 2nd slot and re-drop the real
+    // second run — the very bug the liveness gate exists to prevent.
+    if (Bizzy_Versus_InReadyUp()) return;
     if (Bizzy_NowEpoch() - g_RoundStartEpoch < 15) return;   // too soon — could still be a phantom
     Bizzy_Versus_MarkRoundLive();
 }
@@ -1086,7 +1108,10 @@ stock void Bizzy_Versus_AccumKill(int client, bool isDeath = false)
 stock void Bizzy_Versus_AccumDamage(int attacker, int victim, int damage, bool friendly)
 {
     if (!g_RoundActive) return;
-    MaybeMarkLiveFromCombat();   // fallback liveness signal (elapsed-gated vs phantoms)
+    // Friendly fire is never proof a round is live — survivors can shoot each other
+    // in the saferoom during ready-up. Only real (cross-team) damage counts toward
+    // the combat liveness fallback; FF is still accumulated for stats below.
+    if (!friendly) MaybeMarkLiveFromCombat();   // fallback liveness signal (elapsed-gated + ready-up-gated vs phantoms)
     if (Bizzy_IsValidPlayer(attacker))
     {
         g_RoundClients[attacker].damageDealt += damage;

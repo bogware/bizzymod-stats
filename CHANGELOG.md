@@ -3,7 +3,28 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
-## [0.7.5] — UNRELEASED
+## [0.7.6] — UNRELEASED
+
+### Fixed
+
+- **Combat liveness fallback could still drop a chapter's real second run.** The
+  fallback that promotes a candidate round to a real half on "first real combat"
+  (used only when the `player_left_start_area` / `player_left_safe_area` saferoom
+  signals don't fire) was gated only on `elapsed >= 15s`. Between a chapter's two
+  runs there is a ready-up/scenario-restart window that can exceed 15s; a saferoom
+  friendly-fire tick — or a stray/queued hit or FF kill — during that window could
+  promote the between-runs **phantom**, consume the chapter's second ordinal slot,
+  and cause the real second run to be rejected (`g_MapRoundOrdinal >= 2`) — i.e. the
+  same second-half-dropped symptom 0.7.5 set out to fix, via a different path.
+  Two guards close it: (1) the combat fallback now no-ops while the server is in
+  ready-up (`IsInReady()`, readyup.smx) — the exact window phantoms live in; the
+  primary saferoom-leave signal, which only fires *after* ready-up, is unaffected;
+  and (2) friendly fire no longer feeds the combat fallback at all (survivors can
+  FF in the saferoom; FF is never proof a round is live). `IsInReady` is marked an
+  **optional** native (`AskPluginLoad2`), so the plugin still loads unchanged on
+  coop servers with no readyup.smx.
+
+## [0.7.5] — 2026-09-22
 
 ### Fixed
 

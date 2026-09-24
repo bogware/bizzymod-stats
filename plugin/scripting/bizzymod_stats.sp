@@ -50,6 +50,18 @@ ConVar g_cvBotMultiplier;       // declared for future bot-related penalty scali
 ConVar g_cvVersusMutations;     // mutation gamemodes to record as Realism-Versus (Dugout: "mutation12")
 
 // -----------------------------------------------------------------------------
+// Plugin load. IsInReady() (readyup.smx) is used ONLY by the versus liveness
+// fallback to avoid promoting a phantom during ready-up; mark it optional so this
+// plugin still loads on coop servers that don't run readyup.smx.
+// -----------------------------------------------------------------------------
+
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+    MarkNativeAsOptional("IsInReady");
+    return APLRes_Success;
+}
+
+// -----------------------------------------------------------------------------
 // Module sources. Order matters only for compile-time symbol resolution;
 // runtime init ordering is controlled by OnPluginStart().
 // -----------------------------------------------------------------------------
