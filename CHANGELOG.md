@@ -3,6 +3,196 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.7] — UNRELEASED
+
+### Fixed
+
+- **Only ONE of a versus map's two survivor runs was ever recorded — always
+  `round_index=1`, always `survivor_team='A'` — so win/loss never resolved.**
+  Root-caused from live match data: the FIRST survivor run of every chapter was
+  destroyed before it could be recorded, by two async-ordering bugs. (A) Chapters
+  2..N: the map-id resolves ~1s after `OnMapStart`, but the new map's first
+  `Round_Start` has already opened a candidate; `TryOpenPendingChapter` then treated
+  that fresh, not-yet-live candidate as a leftover and discarded it via
+  `CloseRound(0,0,0)`, killing the new chapter's real first run. Now the discard is
+  gated on `g_RoundLive` — a genuine leftover half is already live, so only that is
+  closed; the new map's own candidate is kept and promotes normally. (B) Chapter 1:
+  the match's first `Round_Start` fired while the `matches` INSERT was still in
+  flight (`g_MatchId == 0`) and was dropped by the `Event_VRoundStart` guard. The
+  guard now allows a candidate to open while `g_MatchOpening` is set (OpenMatch sets
+  it synchronously in `OnMapStart`), binding to the chapter when the id lands. Net:
+  both runs of a chapter are recorded, round_index 1 then 2, survivor_team A then B.
+  KNOWN CAVEAT (to validate live): a recovered first run's `duration_s` is measured
+  from map-load and so includes the pre-round ready-up window (durations inflated,
+  not phantom); and correct A/B-to-team mapping still depends on the survivor-side
+  read — confirm both on a live bake match.
+
+## [0.7.6] — UNRELEASED
+
+### Fixed
+
+- **Combat liveness fallback could still drop a chapter's real second run.** The
+  fallback that promotes a candidate round to a real half on "first real combat"
+  (used only when the `player_left_start_area` / `player_left_safe_area` saferoom
+  signals don't fire) was gated only on `elapsed >= 15s`. Between a chapter's two
+  runs there is a ready-up/scenario-restart window that can exceed 15s; a saferoom
+  friendly-fire tick — or a stray/queued hit or FF kill — during that window could
+  promote the between-runs **phantom**, consume the chapter's second ordinal slot,
+  and cause the real second run to be rejected (`g_MapRoundOrdinal >= 2`) — i.e. the
+  same second-half-dropped symptom 0.7.5 set out to fix, via a different path.
+  Two guards close it: (1) the combat fallback now no-ops while the server is in
+  ready-up (`IsInReady()`, readyup.smx) — the exact window phantoms live in; the
+  primary saferoom-leave signal, which only fires *after* ready-up, is unaffected;
+  and (2) friendly fire no longer feeds the combat fallback at all (survivors can
+  FF in the saferoom; FF is never proof a round is live). `IsInReady` is marked an
+  **optional** native (`AskPluginLoad2`), so the plugin still loads unchanged on
+  coop servers with no readyup.smx.
+
+## [0.7.5] — 2026-09-22
+
+### Fixed
+
+- **Only one of a chapter's two survivor runs was recorded; the second half was
+  dropped as an empty phantom.** On mutation12 the engine fires extra `round_start`
+  events during ready-up and the scenario restart *between* a chapter's two survivor
+  runs. The plugin counted each `round_start` as a half, so a 0-second phantom
+  filled the "round 2" slot, prematurely completed+closed the chapter, and the
+  real second run (same map name) was then rejected — so half the versus play, and
+  every chapter's true winner, was lost. (This pre-dated the 0.7.3 rework, which
+  merely exposed it by no longer copying round 1's data into the phantom.) A
+  `round_start` now opens only a **candidate** window; it is counted as a real half
+  — consuming an ordinal slot and inserting its `match_rounds` row — only once it
+  goes **live**: survivors leave the saferoom (`player_left_start_area`, the signal
+  the competitive stack uses) or real combat occurs (fallback). A phantom never
+  goes live, so at `round_end` it is discarded without touching the chapter, which
+  lets the real second run land as round 2. Both halves of each chapter are now
+  captured with correct, opposite `survivor_team` and per-player sides (which also
+  removes the team-letter drift that mis-credited some chapters). Logs each round's
+  live/discard/close for validation.
+
+## [0.7.4] — UNRELEASED
+
+### Changed
+
+- **Match win/loss now decides on the cumulative lead once ≥2 chapters complete,
+  not on reaching the finale.** Whole campaigns almost never finish, so keying
+  match W/L on the finale gave it a near-zero hit rate. A match now records a
+  win/loss (from the cumulative survivor-score lead across the campaign) as soon
+  as two chapters have completed both halves; fewer than two completed chapters
+  is `abandoned` (no W/L), regardless of how the match ended. The pure
+  per-chapter aggregate — `maps_won` / `maps_lost`, i.e. the user-facing "Round"
+  win/loss — is unchanged and still credited independently at each chapter close.
+- **Dropped the dead `rounds_won` / `rounds_lost` columns** from the
+  `player_versus_stats` rollup: a versus half has no individual winner (the
+  chapter is decided by comparing the two halves), so these were always 0 and
+  made `round_winrate_pct` read 0%. The plugin no longer writes them; migration
+  007 drops the columns and recomputes the round win-rate view from
+  `maps_won` / `maps_lost`.
+
+### Fixed
+
+- **Career stats collapsed under `server_id=0`.** All five `player_stats`
+  upserts in the session flush hardcoded `server_id` to the literal `0` instead
+  of the resolved `g_ServerId`, so every server's coop career rollups piled into
+  one dangling `server_id=0` row and per-server leaderboards were impossible
+  (`player_stats` PK is `player_id, gamemode_id, difficulty_id, server_id`).
+  Now keyed to the real server id. Historical `server_id=0` rows are left as a
+  legacy blob (they aggregated all servers and can't be split back); global
+  views still sum correctly and new sessions attribute per-server.
+
+## [0.7.3] — UNRELEASED
+
+### Fixed
+
+- **Versus chapters split into ghost maps; survivor team never flipped.** Two
+  linked state-machine defects corrupted per-chapter versus stats (`maps_won` /
+  `maps_lost` ~50% low, `player_versus_stats` undercounting, wrong chapter
+  winners). (1) **Ghost `match_maps`.** On mutation12 the engine fires
+  `OnMapStart` more than once per chapter (a scenario restart between the two
+  halves, and often another after them), and the plugin opened a `match_map` on
+  each — so every real chapter became a 2-round map plus one or more empty
+  duplicates with the same `map_id`. Chapters are now gated on the engine
+  `map_id` (`g_ChapterMapId`): a new `match_map` opens only when the map actually
+  changes; same-map restarts are ignored and the two halves are gated by the
+  round counter. (2) **`survivor_team` didn't alternate.** The engine's per-half
+  side swap races `round_start` on this build (some halves already swapped, some
+  not), so reading sides at `round_start` was often stale and recorded both
+  halves of a chapter on the same team — piling all survivor points onto one
+  side and deciding the winner wrong. Sides and the survivor team are now read
+  **fresh at `round_end`**, where the half's sides have settled; team letters are
+  anchored once per match (from the first half) and never auto-reassigned on the
+  routine per-half swap. Also guards a duplicate match open when a scenario
+  restart lands in the async gap before the `matches` row returns. The corrupt
+  historical `player_versus_stats` rollup is truncated on deploy (only a handful
+  of gm5 matches; not migrated) and repopulates correctly from new matches.
+
+## [0.7.2] — UNRELEASED
+
+### Fixed
+
+- **Leaked open sessions on server restart.** Sessions were only closed on the
+  disconnect/mapchange path, so a server restart (the benign sm_RestartEmpty
+  empty-restart) or a plugin reload with sessions still open left those rows with
+  `ended_at=NULL` forever — pure data loss (the leaked rows never captured combat,
+  and they skewed session counts / "currently online" logic). Added a one-shot
+  startup sweep in `Bizzy_OnSessionInit` mirroring `AbandonStaleMatchesForServer`:
+  it closes this server's dangling sessions once `g_ServerId` resolves (with a 60s
+  guard so a freshly-opened session isn't caught). One deploy also clears the
+  existing backlog (97 stale rows on the Dugout at time of writing).
+
+## [0.7.1] — UNRELEASED
+
+### Fixed
+
+- **Bizzy's Dugout recorded no versus stats at all.** Its realism-versus runs as
+  `mp_gamemode "mutation12"` (vscript_replacer swaps `mutation12` →
+  `bizzymodRealism`), which `Bizzy_DetectGameMode()` classified as plain
+  `GameMode_Mutation` — so `Bizzy_Versus_OnMapStart()` returned early and never
+  opened a match. Days of live play (297 sessions) produced zero match/chapter
+  rows. Added the `bizzymod_stats_versus_mutations` cvar (default `"mutation12"`):
+  any listed mutation gamemode is now recorded as Realism-Versus, so per-chapter
+  versus recording engages. Sessions were always captured; only the versus layer
+  was dormant.
+
+## [0.7.0] — UNRELEASED
+
+### Changed
+
+- **Versus stats now accrue PER CHAPTER, not per whole match.** In versus a
+  "match" is a whole campaign and almost never finishes (players leave near the
+  end), so `player_versus_stats` — which only rolled up at match close — stayed
+  empty in practice. It now rolls up at the close of each **chapter** (a map's
+  two halves, "play Survivor and Infected once"), inside the round-2 DB
+  transaction so the rollup sees both halves' `player_round_stats` atomically. A
+  completed chapter credits every player immediately, even if the match is later
+  abandoned. `maps_won`/`maps_lost` are the win/loss record (one per chapter);
+  win/loss streaks now count consecutive chapters.
+
+### Fixed
+
+- **Second versus half (round 2) was never recorded.** Half detection relied on
+  the `versus_round_start` event's `is_secondary_round` flag, which stays `false`
+  on this build, so every half tried to insert as round 1 and hit the
+  `match_rounds.uq_round_idx` unique key (`Duplicate entry 'N-1'`). Halves are now
+  counted from the engine `round_start` event with idempotency guards, so both
+  halves and the per-chapter winner are recorded. Chapters no longer sit
+  `incomplete`, and chapter winners are decided from plugin Survivor points (the
+  engine distance netprop reads 0 on this build; an engine-accurate winner is a
+  documented future refinement).
+- **First chapter of every match was silently dropped.** `OpenMatchMap()` ran
+  synchronously right after the async `OpenMatch()`, while `g_MatchId` was still
+  0, so the first chapter (its rounds and rollup) was lost. The first chapter is
+  now opened from the `OnMatchInserted` callback once `g_MatchId` is set.
+- **Plugin failed to load when an optional game event is absent.** Event hooks
+  used `HookEvent`, which throws (aborting `OnPluginStart`) if an event such as
+  `entered_checkpoint` doesn't exist on the running build. Switched to
+  `HookEventEx`, which skips a missing event instead of failing the plugin.
+- **`OnPluginStart` crash when `adminmenu` isn't loaded yet.** `GetAdminTopMenu()`
+  is called at startup; it is an unbound native when the plugin loads before
+  `adminmenu.smx` (e.g. inside a matchmode plugin-reload chain), aborting startup.
+  Now guarded with `LibraryExists("adminmenu")`; the `OnAdminMenuReady` forward
+  still wires the menu when `adminmenu` (re)loads.
+
 ## [0.6.1] — UNRELEASED
 
 ### Fixed
