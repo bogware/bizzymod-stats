@@ -372,7 +372,12 @@ static void TryOpenPendingChapter()
 
     // Genuine new chapter. Close a dangling half + the previous chapter first so we
     // never leak an open round across the boundary (mirrors Event_VMapTransition).
-    if (g_RoundActive)
+    // Only close a round that actually went LIVE — the map-id resolves ASYNC ~1s
+    // after OnMapStart, by which point the NEW map's own first Round_Start has
+    // already opened a fresh (not-yet-live) candidate here. Discarding that would
+    // kill the new chapter's real first survivor run (the second-half-loss bug); a
+    // genuine leftover half from the previous chapter is g_RoundLive=true.
+    if (g_RoundActive && g_RoundLive)
         CloseRound(0, 0, 0);
     if (g_MatchMapId != 0)
         FlushOpenMap();
@@ -579,7 +584,13 @@ static void FlushOpenMap()
 // real second run.
 static void Event_VRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-    if (!g_VersusActive || g_MatchId == 0) return;
+    if (!g_VersusActive) return;
+    // The matches INSERT is async: on a match's FIRST map, g_MatchId is still 0 when
+    // that map's first Round_Start fires. Dropping it here lost the match's very first
+    // survivor run. OpenMatch sets g_MatchOpening synchronously in OnMapStart (before
+    // any Round_Start), so allow the candidate to open while the INSERT is in flight;
+    // it binds to the chapter when OnMatchInserted / OnMatchMapInserted lands.
+    if (g_MatchId == 0 && !g_MatchOpening) return;
     if (g_RoundActive) return;   // already inside a round window (duplicate round_start)
 
     g_RoundActive        = true;

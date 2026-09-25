@@ -3,6 +3,30 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.7] — UNRELEASED
+
+### Fixed
+
+- **Only ONE of a versus map's two survivor runs was ever recorded — always
+  `round_index=1`, always `survivor_team='A'` — so win/loss never resolved.**
+  Root-caused from live match data: the FIRST survivor run of every chapter was
+  destroyed before it could be recorded, by two async-ordering bugs. (A) Chapters
+  2..N: the map-id resolves ~1s after `OnMapStart`, but the new map's first
+  `Round_Start` has already opened a candidate; `TryOpenPendingChapter` then treated
+  that fresh, not-yet-live candidate as a leftover and discarded it via
+  `CloseRound(0,0,0)`, killing the new chapter's real first run. Now the discard is
+  gated on `g_RoundLive` — a genuine leftover half is already live, so only that is
+  closed; the new map's own candidate is kept and promotes normally. (B) Chapter 1:
+  the match's first `Round_Start` fired while the `matches` INSERT was still in
+  flight (`g_MatchId == 0`) and was dropped by the `Event_VRoundStart` guard. The
+  guard now allows a candidate to open while `g_MatchOpening` is set (OpenMatch sets
+  it synchronously in `OnMapStart`), binding to the chapter when the id lands. Net:
+  both runs of a chapter are recorded, round_index 1 then 2, survivor_team A then B.
+  KNOWN CAVEAT (to validate live): a recovered first run's `duration_s` is measured
+  from map-load and so includes the pre-round ready-up window (durations inflated,
+  not phantom); and correct A/B-to-team mapping still depends on the survivor-side
+  read — confirm both on a live bake match.
+
 ## [0.7.6] — UNRELEASED
 
 ### Fixed
