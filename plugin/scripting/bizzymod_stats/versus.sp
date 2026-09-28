@@ -97,6 +97,7 @@ char g_MatchCampaign[64]   = "";
 
 bool g_VersusActive        = false; // current gamemode is a versus-like mode
 int  g_RoundStartEpoch     = 0;
+int  g_RoundLiveEpoch      = 0;     // epoch the round went LIVE; duration_s is measured from here (not round_start) so it excludes the pre-round ready-up window
 int  g_TeamScoreA          = 0; // cumulative on current match
 int  g_TeamScoreB          = 0;
 int  g_MatchMapPluginA     = 0; // plugin Survivor points on current chapter (drives the winner)
@@ -598,6 +599,7 @@ static void Event_VRoundStart(Event event, const char[] name, bool dontBroadcast
     g_RoundLivePending   = false;
     g_RoundId            = 0;
     g_RoundStartEpoch    = Bizzy_NowEpoch();
+    g_RoundLiveEpoch     = 0;
     g_TankAppearedRound  = false;
     g_WitchAppearedRound = false;
     g_FirstBloodFired    = false;
@@ -636,6 +638,7 @@ void Bizzy_Versus_MarkRoundLive()
     if (g_MapRoundOrdinal >= 2) return;   // chapter already has its two live halves
 
     g_RoundLive  = true;
+    g_RoundLiveEpoch = Bizzy_NowEpoch();    // measure duration_s from live, not from round_start (excludes ready-up)
     g_MapRoundOrdinal++;
     g_RoundIndex = g_MapRoundOrdinal;      // 1 or 2
 
@@ -816,7 +819,8 @@ static void CloseRound(int reason, int winnerTeam, int engineScore)
         return;
     }
 
-    int duration = Bizzy_NowEpoch() - g_RoundStartEpoch;
+    int durEpoch = (g_RoundLiveEpoch != 0) ? g_RoundLiveEpoch : g_RoundStartEpoch;
+    int duration = Bizzy_NowEpoch() - durEpoch;
     if (duration < 0) duration = 0;
 
     // Settled per-client sides at round_end (fresh read; cache fallback for a

@@ -3,6 +3,26 @@
 All notable changes to bizzymod-stats are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); we use SemVer.
 
+## [0.7.8] — UNRELEASED
+
+### Changed
+
+- **Round `duration_s` is now measured from when the round goes LIVE, not from
+  `round_start`** — so it no longer includes the pre-round ready-up window. Before,
+  a recovered first run's clock started at map-load, inflating its duration (~50s+
+  vs the second run). Added `g_RoundLiveEpoch` (stamped in `Bizzy_Versus_MarkRoundLive`,
+  reset in `Event_VRoundStart`) and used it for the `duration_s` calc in `CloseRound`.
+  The `>15s` combat-fallback promotion gate still uses `g_RoundStartEpoch` (unchanged).
+  **Capture logic (candidate/live/discard/insert — the 0.7.7 both-halves fix) is
+  untouched**, so this cannot regress round capture.
+
+### Not changed (investigated, no action)
+
+- The "first map of a match records only one survivor run" was confirmed via live
+  game logs to be a **match-assembly artifact, not a bug**: on the first map the
+  server plays a single real run (after a long ready-up while players load) then
+  changelevels to map 2, so there is no second run to capture. No fix warranted.
+
 ## [0.7.7] — UNRELEASED
 
 ### Fixed
