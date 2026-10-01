@@ -22,7 +22,7 @@ The runner only needs the prerequisites above to be installed once.
 ## What it tests
 
 1. Plugin compiles with zero errors via `spcomp64`.
-2. All 14 migrations apply to a fresh `bizzymod_stats_test` database.
+2. All 16 migrations apply to a fresh `bizzymod_stats_test` database.
 3. Re-running the runner is a no-op (idempotency).
 4. Catalog tables (`games`, `gamemodes`, `difficulties`, `special_infected`,
    `survivors`, `awards`, `weapons`) have at least the expected seed counts.
