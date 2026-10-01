@@ -5,6 +5,22 @@ All notable changes to bizzymod-stats are documented here. Format follows
 
 ## [0.7.8] — UNRELEASED
 
+### Added (schema / views — DB-only, no plugin change)
+
+- **Penultimate, mini-game, and tie outcome views** (`migration 015`). In
+  competitive L4D2 the match is usually decided at the penultimate map — finales
+  are chaotic, frequently skipped, or the game is called early — so most matches
+  end `abandoned` and the real result is lost. New views recover it from data we
+  already store (per-half survivor scores), computed retroactively, no plugin
+  change: `v_match_penultimate` (winner going into the finale, for matches that
+  reached it, + whether the finale flipped the result), `v_match_minigame` (a
+  decided result for matches that never reached the finale), and per-player
+  `v_player_penultimate` / `v_player_minigame` / `v_player_ties` leaderboards,
+  plus a tiny `finale_maps` reference table. Scoring is cumulative survivor points
+  (same model as the full-match winner). On current data this ~triples the number
+  of matches with a decided outcome (6 → ~20), and the penultimate winner matches
+  the full-match winner on every completed match (a correctness check).
+
 ### Changed
 
 - **Round `duration_s` is now measured from when the round goes LIVE, not from
