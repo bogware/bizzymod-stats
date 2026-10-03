@@ -128,7 +128,7 @@ $PYTHON "$ROOT/schema/scripts/migrate.py" \
     --database bizzymod_stats_test > "$SCRIPT_DIR/.migrate.log" 2>&1 \
     || { cat "$SCRIPT_DIR/.migrate.log"; fail "migrations failed"; }
 COUNT=$(grep -c "applied\." "$SCRIPT_DIR/.migrate.log" || true)
-[[ "$COUNT" -eq 14 ]] || fail "expected 14 migrations, applied $COUNT"
+[[ "$COUNT" -eq 16 ]] || fail "expected 16 migrations, applied $COUNT"
 pass "$COUNT migrations applied"
 
 # ----------------------------------------------------------------------------
