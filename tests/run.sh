@@ -57,16 +57,27 @@ if [[ -z "$SPCOMP" || -z "$SM_INCLUDE" ]]; then
         && ! -x "$TOOLCHAIN/sm/addons/sourcemod/scripting/spcomp64" ]]; then
         echo "  fetching SourceMod 1.12 toolchain to $TOOLCHAIN..."
         mkdir -p "$TOOLCHAIN"
+        # The drop server keeps only recent snapshot builds, so a hardcoded
+        # git#### filename starts 404ing once it rotates out — and `curl -s`
+        # without `-f` then silently writes the HTML 404 page to sm.archive,
+        # which tar/unzip chokes on ("not in gzip format"). Resolve the current
+        # build from AlliedMods' `sourcemod-latest-<os>` pointer, and use
+        # `curl -f` so a bad response fails loudly instead of saving junk.
+        SM_BASE="https://sm.alliedmods.net/smdrop/1.12"
         case "$(uname -s)" in
-            MINGW*|MSYS*|CYGWIN*) SM_URL="https://sm.alliedmods.net/smdrop/1.12/sourcemod-1.12.0-git7210-windows.zip" ;;
-            Linux*)               SM_URL="https://sm.alliedmods.net/smdrop/1.12/sourcemod-1.12.0-git7210-linux.tar.gz" ;;
-            Darwin*)              SM_URL="https://sm.alliedmods.net/smdrop/1.12/sourcemod-1.12.0-git7210-mac.tar.gz" ;;
+            MINGW*|MSYS*|CYGWIN*) SM_OS="windows"; SM_EXT="zip" ;;
+            Linux*)               SM_OS="linux";   SM_EXT="tar.gz" ;;
+            Darwin*)              SM_OS="mac";     SM_EXT="tar.gz" ;;
             *)                    echo "  unsupported OS"; exit 1 ;;
         esac
-        curl -sLo "$TOOLCHAIN/sm.archive" "$SM_URL"
-        case "$SM_URL" in
-            *.zip)        unzip -q "$TOOLCHAIN/sm.archive" -d "$TOOLCHAIN/sm" ;;
-            *.tar.gz)     mkdir -p "$TOOLCHAIN/sm" && tar xzf "$TOOLCHAIN/sm.archive" -C "$TOOLCHAIN/sm" ;;
+        SM_FILE="$(curl -fsSL "$SM_BASE/sourcemod-latest-$SM_OS")" \
+            || { echo "  ERROR: could not resolve SourceMod latest-$SM_OS pointer" >&2; exit 1; }
+        curl -fsSL -o "$TOOLCHAIN/sm.archive" "$SM_BASE/$SM_FILE" \
+            || { echo "  ERROR: SourceMod toolchain download failed ($SM_FILE)" >&2; exit 1; }
+        mkdir -p "$TOOLCHAIN/sm"
+        case "$SM_EXT" in
+            zip)     unzip -q "$TOOLCHAIN/sm.archive" -d "$TOOLCHAIN/sm" ;;
+            tar.gz)  tar xzf "$TOOLCHAIN/sm.archive" -C "$TOOLCHAIN/sm" ;;
         esac
     fi
     if [[ -x "$TOOLCHAIN/sm/addons/sourcemod/scripting/spcomp64.exe" ]]; then

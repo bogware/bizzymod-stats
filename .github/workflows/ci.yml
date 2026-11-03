@@ -13,7 +13,16 @@ on:
 jobs:
   test:
     name: Compile + migrations + integrity
-    runs-on: [self-hosted, linux]
+    # ┌───────────────────────────────────────────────────────────────────────┐
+    # │ SECURITY — pull_request builds check out and EXECUTE untrusted code     │
+    # │ (ensure-prereqs.sh, pip install, tests/run.sh). That must NEVER run on  │
+    # │ a self-hosted runner: a malicious fork PR would get code execution and  │
+    # │ secret/credential exfiltration on our persistent, shared runner. Route  │
+    # │ every PR to an ephemeral GitHub-hosted runner (free for public repos);  │
+    # │ trusted events (push to main/develop, manual dispatch) keep the         │
+    # │ self-hosted runner and its pre-provisioned SourceMod toolchain.         │
+    # └───────────────────────────────────────────────────────────────────────┘
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux"]') }}
     steps:
       - uses: actions/checkout@v4
 
